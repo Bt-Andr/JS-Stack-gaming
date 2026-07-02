@@ -1,0 +1,2382 @@
+/*
+ * ╔══════════════════════════════════════════════════════════════════╗
+ * ║  FULLSTACK://QUEST — Les Gardiens de la Stack                      ║
+ * ║  Un RPG pédagogique : 9 secteurs, 9 boss, théorie + pratique.     ║
+ * ╠══════════════════════════════════════════════════════════════════╣
+ * ║  SOMMAIRE                                                          ║
+ * ║   1. THÈME / PALETTE          — couleurs du blueprint             ║
+ * ║   2. DONNÉES                  — MODULES (boss, lore, questions)   ║
+ * ║   3. PROGRESSION              — LEVELS, getLevelInfo, STORAGE_KEY ║
+ * ║   4. BADGES & DIALOGUES       — hauts faits, répliques d'ADA      ║
+ * ║   5. PRATIQUE                 — exécuteur de code, helpers        ║
+ * ║   6. MOTEUR SONORE            — SFX synthétisés (Web Audio)       ║
+ * ║   7. ANIMATIONS               — keyframes injectées (FSQ_CSS)     ║
+ * ║   8. AVATARS                  — ADA & BOSS (SVG génératifs)       ║
+ * ║   9. COMPOSANTS UI            — Frame, HPBar, ComboMeter…         ║
+ * ║  10. VUES                     — Codex, Map, Intro, Battle, Result ║
+ * ║  11. COMPOSANT PRINCIPAL      — état, combat, routage             ║
+ * ╚══════════════════════════════════════════════════════════════════╝
+ */
+import { useState, useEffect, useRef } from "react";
+import {
+  Braces, Sparkles, Hourglass, ShieldCheck, Atom, Triangle, Server, Zap, Crown,
+  Lock, Check, ChevronRight, ArrowLeft, RotateCcw, Skull,
+  Volume2, VolumeX, BookOpen, MessageSquareText,
+  Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle
+} from "lucide-react";
+import {
+  BG, PANEL, PANEL_SOFT, LINE, TEXT, TEXT_MUTED, AMBER, SUCCESS, DANGER,
+  STORAGE_KEY, BADGES, ADA_LINES, pick, getLevelInfo, deepEqual, show,
+  runCode, shuffleIndices, SFX, FSQ_CSS,
+  AdaAvatar, BossAvatar, Frame, Hearts, LoadingScreen, HPBar, ComboMeter,
+  DialogueBubble, BadgeChip,
+  rng, deriveSeed, sampleWithRng, initSrsItem, updateSrsItem, getDueItems,
+} from "./harness/src/quest-shared.jsx";
+import { InstallPrompt } from "./harness/src/install-prompt.jsx";
+
+/* ---------------------------------------------------------------------- */
+/*  DONNÉES — modules & questions                                         */
+/* ---------------------------------------------------------------------- */
+const MODULES = [
+  {
+    id: "js-fond",
+    num: "01",
+    title: "JavaScript — Fondamentaux",
+    subtitle: "Variables, types, fonctions, portée",
+    accent: "#E8964B",
+    Icon: Braces,
+    boss: {
+      name: "VÖID",
+      epithet: "le Spectre Indéfini",
+      kind: "ghost",
+      taunt: "typeof null… même moi j'ignore ce que je suis. Tu ne me définiras jamais.",
+      hit: "Argh… une valeur… DÉFINIE ?!"
+    },
+    lore: "Fragment 01 — « Au commencement était le Langage. Sans portée ni types, les premiers Sprites erraient, indéfinis, dans le brouillard du Scope global. »",
+    intro: "Avant de construire quoi que ce soit, il faut maîtriser le langage lui-même : variables, types, fonctions et portée. Ce module pose les bases indispensables à tout le reste du parcours.",
+    questions: [
+      {
+        prompt: "Quel mot-clé déclare une variable qui ne peut pas être réaffectée ?",
+        options: ["var", "let", "const", "static"],
+        correct: 2,
+        explain: "const empêche la réaffectation de la variable. Attention : un objet ou un tableau déclaré en const reste mutable (on peut modifier son contenu, juste pas réassigner la référence)."
+      },
+      {
+        prompt: "Que renvoie l'expression typeof null ?",
+        options: ["\"null\"", "\"undefined\"", "\"object\"", "\"number\""],
+        correct: 2,
+        explain: "C'est une bizarrerie historique de JavaScript : typeof null vaut \"object\", même si null n'est pas vraiment un objet."
+      },
+      {
+        code: `console.log(1 + "1");\nconsole.log(1 + 1);`,
+        prompt: "Que va afficher ce code, dans l'ordre ?",
+        options: ["\"11\" puis 2", "2 puis \"11\"", "\"11\" puis \"11\"", "Erreur"],
+        correct: 0,
+        explain: "Avec l'opérateur +, dès qu'une chaîne est présente, JavaScript convertit l'autre valeur en chaîne (coercion) : 1 + \"1\" devient \"11\". Sans chaîne, c'est une addition classique : 1 + 1 = 2."
+      },
+      {
+        prompt: "Quelle est la vraie différence entre == et === ?",
+        options: [
+          "Aucune, ils sont strictement identiques",
+          "== compare le type ET la valeur, === seulement la valeur",
+          "=== compare type et valeur (égalité stricte), == convertit les types avant de comparer",
+          "Ils sont interchangeables dans tous les cas"
+        ],
+        correct: 2,
+        explain: "=== (égalité stricte) ne fait aucune conversion : les types doivent déjà correspondre. == tente de convertir les valeurs avant de comparer, ce qui peut produire des surprises (ex : \"5\" == 5 vaut true)."
+      },
+      {
+        prompt: "Quelle portée (scope) a une variable déclarée avec let à l'intérieur d'un bloc { } ?",
+        options: ["Portée globale", "Portée de fonction", "Portée de bloc", "Portée de module uniquement"],
+        correct: 2,
+        explain: "let (et const) sont limités au bloc { } dans lequel ils sont déclarés. C'est une différence majeure avec var, qui ignore les blocs et ne connaît que la portée de fonction."
+      },
+      {
+        code: `function add(a, b) {\n  return a + b;\n}\nconsole.log(add(2));`,
+        prompt: "Que va afficher ce code ?",
+        options: ["2", "NaN", "undefined", "Une erreur"],
+        correct: 1,
+        explain: "Le second argument b n'est pas fourni, donc il vaut undefined. 2 + undefined produit NaN (Not a Number), car l'addition ne peut pas convertir undefined en nombre valide."
+      },
+      {
+        prompt: "Quel type de fonction n'a pas son propre this (il hérite de celui du contexte englobant) ?",
+        options: ["Une fonction classique (function)", "Une fonction fléchée (=>)", "Une méthode de classe", "Une fonction génératrice"],
+        correct: 1,
+        explain: "Les arrow functions ne créent pas leur propre this : elles capturent celui du contexte lexical où elles sont définies. C'est très utile dans les callbacks et les composants."
+      },
+      {
+        prompt: "Quelle méthode de tableau applique une fonction à chaque élément et retourne un NOUVEAU tableau de même longueur ?",
+        options: ["forEach", "map", "filter", "reduce"],
+        correct: 1,
+        explain: "map() transforme chaque élément et retourne un nouveau tableau de même taille. forEach ne retourne rien, filter peut réduire la taille, et reduce accumule une seule valeur."
+      },
+      {
+        type: "code",
+        prompt: "Écris une fonction somme(a, b) qui renvoie la somme de deux nombres.",
+        starter: "function somme(a, b) {\n  // ton code ici\n}",
+        tests: [
+          { call: "somme(2, 3)", expect: 5 },
+          { call: "somme(-1, 1)", expect: 0 },
+          { call: "somme(10, 0)", expect: 10 }
+        ],
+        explain: "Une fonction prend des paramètres et renvoie une valeur avec return. Ici, return a + b additionne les deux nombres reçus — c'est ta première fonction au clavier !"
+      }
+    ]
+  },
+  {
+    id: "js-avance",
+    num: "02",
+    title: "JavaScript Avancé (ES6+)",
+    subtitle: "Destructuring, spread, closures, modules",
+    accent: "#E2725B",
+    Icon: Sparkles,
+    boss: {
+      name: "MUTABILIS",
+      epithet: "le Cloneur",
+      kind: "clone",
+      taunt: "Crois-tu m'avoir copié ? Tu n'as dupliqué que ma surface… mes références t'appartiennent encore.",
+      hit: "Mes références… BRISÉES !"
+    },
+    lore: "Fragment 02 — « Le spread et la closure furent les premiers sortilèges des Anciens Gardiens : étaler, capturer, se souvenir. »",
+    intro: "Le JavaScript moderne (ES6+) apporte des outils puissants — destructuring, spread, closures — qui rendent ton code plus court, plus lisible et plus fiable.",
+    questions: [
+      {
+        prompt: "Que fait l'opérateur spread dans [...arr1, ...arr2] ?",
+        options: [
+          "Il fusionne deux tableaux en copiant leurs éléments dans un nouveau tableau",
+          "Il additionne mathématiquement les deux tableaux",
+          "Il crée une référence partagée entre les deux tableaux",
+          "C'est une erreur de syntaxe"
+        ],
+        correct: 0,
+        explain: "L'opérateur ... \"étale\" les éléments d'un tableau (ou objet). Combiné avec [ ], il permet de construire un nouveau tableau qui contient une copie superficielle des éléments des tableaux d'origine."
+      },
+      {
+        code: `const { a, b = 10 } = { a: 5 };\nconsole.log(b);`,
+        prompt: "Que va afficher console.log(b) ?",
+        options: ["undefined", "5", "10", "Erreur"],
+        correct: 2,
+        explain: "Le destructuring permet de définir une valeur par défaut (b = 10). Comme l'objet source ne contient pas de propriété b, c'est la valeur par défaut qui est utilisée."
+      },
+      {
+        prompt: "À quoi sert Array.prototype.reduce ?",
+        options: [
+          "Filtrer les éléments d'un tableau",
+          "Transformer chaque élément en un autre",
+          "Accumuler tous les éléments en une seule valeur finale",
+          "Trier le tableau"
+        ],
+        correct: 2,
+        explain: "reduce() parcourt le tableau en accumulant un résultat unique à chaque étape (somme, objet, chaîne...), à partir d'une fonction (accumulateur, élément) et d'une valeur initiale."
+      },
+      {
+        code: `function compteur() {\n  let n = 0;\n  return () => ++n;\n}\nconst c = compteur();\nconsole.log(c(), c(), c());`,
+        prompt: "Qu'affiche ce code ?",
+        options: ["0 0 0", "1 1 1", "1 2 3", "undefined undefined undefined"],
+        correct: 2,
+        explain: "C'est une closure : la fonction interne \"se souvient\" de la variable n de son environnement parent, même après que compteur() ait fini de s'exécuter. Chaque appel à c() incrémente ce n persistant."
+      },
+      {
+        prompt: "Dans une méthode d'objet, quelle est la valeur de this dans une fonction fléchée définie à l'intérieur ?",
+        options: [
+          "L'objet courant, toujours",
+          "undefined, toujours",
+          "Celui du contexte englobant (this lexical, capturé au moment de la définition)",
+          "L'objet global window, toujours"
+        ],
+        correct: 2,
+        explain: "Les arrow functions n'ont pas leur propre this : elles utilisent celui de leur environnement de définition. C'est différent d'une fonction classique, dont le this dépend de la façon dont elle est appelée."
+      },
+      {
+        prompt: "Avec \"type\": \"module\" dans package.json, quel système de modules Node.js utilise-t-il par défaut ?",
+        options: ["CommonJS (require/module.exports)", "ES Modules (import/export)", "AMD", "UMD"],
+        correct: 1,
+        explain: "C'est le système ES Modules natif, basé sur les mots-clés import et export, qui devient le standard moderne — par opposition à l'ancien CommonJS (require/module.exports)."
+      },
+      {
+        prompt: "Quelle est la vraie différence entre une copie \"shallow\" (superficielle) et \"deep\" (profonde) d'un objet ?",
+        options: [
+          "Aucune différence concrète",
+          "La copie shallow ne duplique que le premier niveau ; les objets imbriqués restent des références partagées",
+          "La copie deep ne copie que les primitives",
+          "La copie shallow copie récursivement tous les niveaux"
+        ],
+        correct: 1,
+        explain: "Une copie superficielle (via spread ou Object.assign par exemple) duplique le premier niveau de propriétés, mais les objets/tableaux imbriqués restent les mêmes références. Une copie profonde duplique tout, à chaque niveau."
+      },
+      {
+        prompt: "Que fait l'optional chaining ( ?. ), par exemple dans user?.address?.city ?",
+        options: [
+          "Il lance une erreur si une propriété intermédiaire est absente",
+          "Il accède à la propriété, et renvoie undefined (sans erreur) si une référence intermédiaire est null ou undefined",
+          "Il force la conversion du résultat en booléen",
+          "Il clone l'objet avant d'y accéder"
+        ],
+        correct: 1,
+        explain: "L'optional chaining permet de \"descendre\" dans une chaîne de propriétés en toute sécurité : si user ou user.address est null/undefined, l'expression s'arrête et renvoie undefined plutôt que de lever une erreur."
+      },
+      {
+        type: "code",
+        prompt: "Écris une fonction pairs(arr) qui renvoie un NOUVEAU tableau avec uniquement les nombres pairs.",
+        starter: "function pairs(arr) {\n  // indice : utilise .filter\n}",
+        tests: [
+          { call: "pairs([1, 2, 3, 4])", expect: [2, 4] },
+          { call: "pairs([1, 3, 5])", expect: [] },
+          { call: "pairs([2, 4, 6])", expect: [2, 4, 6] }
+        ],
+        explain: "filter() garde les éléments pour lesquels la fonction renvoie true. arr.filter(n => n % 2 === 0) ne conserve que les pairs, dans un nouveau tableau sans toucher à l'original."
+      }
+    ]
+  },
+  {
+    id: "async",
+    num: "03",
+    title: "Asynchrone",
+    subtitle: "Callbacks, Promises, async/await, fetch",
+    accent: "#8ECAE6",
+    Icon: Hourglass,
+    boss: {
+      name: "CHRONOS",
+      epithet: "le Dévoreur de Promesses",
+      kind: "dragon",
+      taunt: "await… await… tu m'attendras pour l'éternité, petit Sprite. Ton fil principal est déjà à moi.",
+      hit: "Résolue ?! Ma Promesse… RÉSOLUE ?!"
+    },
+    lore: "Fragment 03 — « Le Temps lui-même fut dompté le jour où les Gardiens cessèrent de bloquer le fil principal et apprirent à attendre sans s'arrêter. »",
+    intro: "Le web est asynchrone par nature : requêtes réseau, fichiers, timers. Maîtriser les Promises et async/await est indispensable pour tout développeur fullstack.",
+    questions: [
+      {
+        prompt: "Quelle est la vraie différence entre un callback et une Promise ?",
+        options: [
+          "Aucune différence",
+          "Une Promise est un objet représentant un résultat futur (résolu ou rejeté), ce qui évite l'imbrication en cascade des callbacks",
+          "Les callbacks sont plus modernes que les Promises",
+          "Une Promise est toujours synchrone"
+        ],
+        correct: 1,
+        explain: "Une Promise encapsule un résultat asynchrone dans un objet manipulable (.then/.catch ou async/await), ce qui évite le fameux \"callback hell\" des callbacks imbriqués les uns dans les autres."
+      },
+      {
+        prompt: "Que fait précisément le mot-clé await ?",
+        options: [
+          "Il transforme automatiquement une fonction normale en fonction async",
+          "Il met en pause l'exécution de la fonction async jusqu'à résolution de la Promise, sans bloquer le thread principal du navigateur",
+          "Il annule une Promise en cours",
+          "Il exécute plusieurs Promises en parallèle automatiquement"
+        ],
+        correct: 1,
+        explain: "await suspend uniquement la fonction async courante en attendant le résultat de la Promise — le reste du programme (et le thread principal) continue de fonctionner normalement pendant ce temps."
+      },
+      {
+        code: `async function f() {\n  console.log(1);\n  await null;\n  console.log(2);\n}\nf();\nconsole.log(3);`,
+        prompt: "Dans quel ordre ces nombres s'affichent-ils ?",
+        options: ["1, 2, 3", "1, 3, 2", "3, 1, 2", "2, 3, 1"],
+        correct: 1,
+        explain: "Le code synchrone de f() s'exécute immédiatement (affiche 1), puis await met la suite en file d'attente (microtask) et rend la main : console.log(3) s'exécute, et seulement après, la suite de f() reprend (affiche 2)."
+      },
+      {
+        prompt: "Que fait Promise.all([p1, p2, p3]) ?",
+        options: [
+          "Elle exécute les promesses en séquence, une par une",
+          "Elle attend que toutes les promesses soient résolues et renvoie un tableau des résultats, ou rejette dès la première erreur",
+          "Elle renvoie seulement le résultat de la première promesse résolue",
+          "Elle ignore silencieusement les erreurs"
+        ],
+        correct: 1,
+        explain: "Promise.all lance toutes les promesses en parallèle et attend qu'elles soient toutes résolues. Si une seule échoue, Promise.all rejette immédiatement avec cette erreur."
+      },
+      {
+        prompt: "Quelle est la différence entre Promise.all et Promise.allSettled ?",
+        options: [
+          "Aucune différence",
+          "Promise.all rejette dès le premier échec, alors que Promise.allSettled attend toutes les promesses et renvoie le statut (succès ou échec) de chacune",
+          "Promise.allSettled est plus rapide",
+          "Promise.all ignore les rejets"
+        ],
+        correct: 1,
+        explain: "Promise.allSettled ne s'arrête jamais en cas d'erreur : elle attend que toutes les promesses se terminent (résolues ou rejetées) et te donne le détail de chacune, ce qui est utile quand un échec partiel est acceptable."
+      },
+      {
+        prompt: "Que renvoie fetch(url) par défaut ?",
+        options: [
+          "Directement les données JSON",
+          "Une Promise qui se résout en un objet Response, qu'il faut ensuite parser (ex : .json())",
+          "Une chaîne de texte brute",
+          "Un objet XML uniquement"
+        ],
+        correct: 1,
+        explain: "fetch renvoie une Promise<Response>. La Response contient les en-têtes, le statut, etc. Pour obtenir les données utilisables, il faut appeler une méthode comme response.json() ou response.text(), qui renvoie elle-même une Promise."
+      },
+      {
+        prompt: "Que se passe-t-il si une Promise est rejetée sans aucun .catch ni try/catch ?",
+        options: [
+          "Rien, l'application continue normalement sans avertissement",
+          "Une \"Unhandled Promise Rejection\" est signalée",
+          "La Promise devient automatiquement résolue",
+          "Le thread principal se bloque"
+        ],
+        correct: 1,
+        explain: "JavaScript signale les rejets de Promise non gérés (Unhandled Promise Rejection), aussi bien dans le navigateur que sous Node.js. C'est pourquoi il faut toujours prévoir un .catch ou un try/catch autour d'un await."
+      },
+      {
+        prompt: "Comment exécuter plusieurs appels asynchrones en parallèle plutôt qu'en série ?",
+        options: [
+          "Enchaîner plusieurs await l'un après l'autre",
+          "Lancer tous les appels d'abord (sans await), puis utiliser Promise.all sur les promesses obtenues",
+          "Utiliser une boucle for avec await à chaque itération",
+          "Ce n'est pas possible en JavaScript"
+        ],
+        correct: 1,
+        explain: "await successifs exécutent les appels en série (chacun attend le précédent). Pour du parallélisme, il faut démarrer toutes les promesses sans attendre immédiatement, puis les attendre ensemble avec Promise.all."
+      },
+      {
+        type: "order",
+        prompt: "Remets dans le bon ordre le corps d'une fonction async qui récupère puis renvoie des données JSON.",
+        lines: [
+          "const res = await fetch(url);",
+          "const data = await res.json();",
+          "return data;"
+        ],
+        explain: "On attend d'abord la réponse réseau (await fetch), PUIS on parse le corps en JSON (res.json() renvoie elle aussi une Promise, d'où le second await), et enfin on renvoie les données."
+      }
+    ]
+  },
+  {
+    id: "ts",
+    num: "04",
+    title: "TypeScript",
+    subtitle: "Types, interfaces, generics, sécurité",
+    accent: "#6C8AE4",
+    Icon: ShieldCheck,
+    boss: {
+      name: "ANYTYPE",
+      epithet: "le Sans-Forme",
+      kind: "blob",
+      taunt: "any, any, any… aucune règle ne me contraint, aucune forme ne me retient. Tu ne peux pas me typer.",
+      hit: "unknown… tu m'obliges à RÉVÉLER ma forme !"
+    },
+    lore: "Fragment 04 — « Donner un Type, c'est donner un Nom. Et nommer une chose, c'est commencer à la maîtriser. »",
+    intro: "TypeScript ajoute une couche de types statiques au-dessus de JavaScript, pour détecter des erreurs avant même d'exécuter le code. C'est un standard dans les projets professionnels.",
+    questions: [
+      {
+        prompt: "Quel est l'avantage principal de TypeScript par rapport à JavaScript pur ?",
+        options: [
+          "Il s'exécute plus vite dans le navigateur",
+          "Il ajoute un système de types statiques, vérifié à la compilation, qui détecte des erreurs avant l'exécution",
+          "Il remplace totalement JavaScript au runtime",
+          "Il supprime le besoin d'écrire des tests"
+        ],
+        correct: 1,
+        explain: "TypeScript se compile (transpile) en JavaScript classique : il n'apporte aucun gain de performance runtime, mais il vérifie la cohérence des types pendant le développement, avant même d'exécuter quoi que ce soit."
+      },
+      {
+        prompt: "Comment typer correctement une fonction qui prend un nombre et retourne une chaîne ?",
+        options: [
+          "function f(x): number => string",
+          "function f(x: number): string",
+          "function f(x: string): number",
+          "function f(x: any): any"
+        ],
+        correct: 1,
+        explain: "La syntaxe place le type du paramètre après les deux-points (x: number), et le type de retour après les parenthèses, avant les accolades : function f(x: number): string."
+      },
+      {
+        prompt: "Parmi ces affirmations sur interface vs type en TypeScript, laquelle est correcte ?",
+        options: [
+          "Une interface peut être étendue par plusieurs déclarations (merging), ce qu'un type ne permet pas",
+          "Un type peut représenter des unions et des types primitifs, ce qu'une interface ne fait pas directement",
+          "Les deux affirmations précédentes sont vraies",
+          "Il n'existe absolument aucune différence entre les deux"
+        ],
+        correct: 2,
+        explain: "Pour décrire la forme d'un objet simple, interface et type sont souvent interchangeables. Mais interface bénéficie du \"declaration merging\" (fusion automatique), tandis que type gère plus naturellement les unions (A | B) et les alias de primitifs."
+      },
+      {
+        code: `function identity<T>(x: T): T {\n  return x;\n}`,
+        prompt: "Que permet ce \"generic\" <T> ?",
+        options: [
+          "Forcer x à être de type any",
+          "Réutiliser la fonction avec différents types, tout en garantissant que le type d'entrée correspond au type de sortie",
+          "Transformer T en chaîne automatiquement",
+          "C'est une erreur de syntaxe"
+        ],
+        correct: 1,
+        explain: "Un generic comme <T> est un \"paramètre de type\" : il permet d'écrire une fonction réutilisable pour n'importe quel type, tout en conservant la relation entre les types (ici, le type retourné est toujours identique au type reçu)."
+      },
+      {
+        code: `interface User {\n  name: string;\n  email?: string;\n}`,
+        prompt: "Que signifie le ? après email dans cette interface ?",
+        options: ["La propriété est obligatoire", "La propriété est optionnelle", "La propriété est en lecture seule", "La propriété est un type union"],
+        correct: 1,
+        explain: "Le ? marque une propriété optionnelle : un objet User peut être valide avec ou sans la propriété email. Son type effectif devient alors string | undefined."
+      },
+      {
+        prompt: "Comment représente-t-on en TypeScript \"soit une chaîne, soit un nombre\" ?",
+        options: ["string & number", "string | number", "string + number", "[string, number]"],
+        correct: 1,
+        explain: "Le symbole | (pipe) crée un type union : string | number signifie que la valeur peut être l'un OU l'autre. Le & (intersection) signifierait au contraire qu'elle doit satisfaire les deux types à la fois."
+      },
+      {
+        code: `const config = { mode: "dark" } as const;`,
+        prompt: "À quoi sert as const ici ?",
+        options: [
+          "Convertir l'objet en constante au moment de l'exécution",
+          "Indiquer au compilateur de typer la valeur de façon la plus précise possible (littéral \"dark\", propriétés readonly)",
+          "Supprimer tous les types de l'objet",
+          "Transformer l'objet en enum"
+        ],
+        correct: 1,
+        explain: "as const verrouille le typage au niveau le plus précis : mode est typé comme le littéral \"dark\" (et non string), et les propriétés deviennent readonly. C'est très utile pour des constantes ou de la configuration."
+      },
+      {
+        prompt: "Pourquoi préférer unknown à any quand on reçoit une donnée dont le type n'est pas garanti ?",
+        options: [
+          "Ils sont parfaitement identiques",
+          "unknown oblige à vérifier ou affiner le type avant de l'utiliser, ce qui est plus sûr",
+          "any est plus sûr que unknown",
+          "unknown ne peut pas être utilisé en TypeScript"
+        ],
+        correct: 1,
+        explain: "any désactive complètement la vérification de type (dangereux). unknown accepte aussi n'importe quelle valeur, mais le compilateur t'empêche de l'utiliser tant que tu n'as pas vérifié son type réel (via typeof, instanceof, etc.)."
+      },
+      {
+        type: "code",
+        prompt: "Écris une fonction dernier(arr) qui renvoie le dernier élément d'un tableau (ou undefined s'il est vide).",
+        starter: "function dernier(arr) {\n  // ton code ici\n}",
+        tests: [
+          { call: "dernier([1, 2, 3])", expect: 3 },
+          { call: "dernier(['a'])", expect: "a" },
+          { call: "dernier([])", expect: undefined }
+        ],
+        explain: "arr[arr.length - 1] accède au dernier index. Sur un tableau vide, length - 1 vaut -1 et arr[-1] est undefined : exactement le comportement attendu, sans cas particulier à écrire."
+      }
+    ]
+  },
+  {
+    id: "react",
+    num: "05",
+    title: "React",
+    subtitle: "Composants, props, state, hooks",
+    accent: "#4FD1B5",
+    Icon: Atom,
+    boss: {
+      name: "RERENDER",
+      epithet: "l'Hydre aux mille têtes",
+      kind: "hydra",
+      taunt: "Coupe une tête, j'en re-render mille. Mon état déborde, mes effets se relancent sans fin.",
+      hit: "Ma key… tu as trouvé ma CLÉ unique !"
+    },
+    lore: "Fragment 05 — « Les composants sont les cellules vivantes de l'Interface : ils naissent, réagissent à leur état, et se rendent encore et encore. »",
+    intro: "React est la bibliothèque la plus utilisée pour construire des interfaces. Composants, state et hooks sont les briques de base de toute application moderne.",
+    questions: [
+      {
+        prompt: "Qu'est-ce qu'un composant React, fondamentalement ?",
+        options: [
+          "Une feuille de style CSS",
+          "Une fonction (ou classe) qui retourne du JSX décrivant une partie de l'interface",
+          "Un fichier de configuration du projet",
+          "Un type de base de données"
+        ],
+        correct: 1,
+        explain: "Un composant React est avant tout une fonction JavaScript qui prend des props en entrée et retourne du JSX (la description de ce qui doit s'afficher). React se charge de transformer ce JSX en éléments du DOM réel."
+      },
+      {
+        prompt: "Que fait le hook useState ?",
+        options: [
+          "Il exécute un effet de bord après le rendu",
+          "Il déclare une variable d'état locale au composant, qui déclenche un re-rendu quand elle change",
+          "Il mémorise une fonction pour éviter de la recréer",
+          "Il donne un accès direct au DOM"
+        ],
+        correct: 1,
+        explain: "useState renvoie une paire [valeur, fonctionDeMiseÀJour]. Appeler cette fonction met à jour la valeur ET déclenche un nouveau rendu du composant pour refléter ce changement à l'écran."
+      },
+      {
+        code: `useEffect(() => {\n  console.log("monté");\n}, []);`,
+        prompt: "Quand ce useEffect s'exécute-t-il, avec un tableau de dépendances vide ?",
+        options: ["À chaque rendu", "Jamais", "Une seule fois, juste après le premier rendu (montage)", "Uniquement au démontage du composant"],
+        correct: 2,
+        explain: "Un tableau de dépendances vide [ ] signifie \"aucune dépendance ne change jamais\" : l'effet ne s'exécute donc qu'une seule fois, immédiatement après le premier rendu du composant (équivalent du montage)."
+      },
+      {
+        prompt: "Quelle règle s'applique aux props reçues par un composant enfant ?",
+        options: [
+          "L'enfant peut les modifier directement",
+          "Elles sont en lecture seule (immuables) du point de vue de l'enfant qui les reçoit",
+          "Elles remplacent complètement le state",
+          "Elles ne servent qu'à passer des styles"
+        ],
+        correct: 1,
+        explain: "Les props descendent du parent vers l'enfant et sont en lecture seule : un composant enfant ne doit jamais modifier directement une prop reçue. Pour changer une donnée, il faut passer par le state (souvent géré par le parent)."
+      },
+      {
+        code: `items.map(item => <li key={item.id}>{item.label}</li>)`,
+        prompt: "Pourquoi utiliser une key unique sur chaque élément d'une liste ?",
+        options: [
+          "Uniquement pour le style CSS",
+          "Pour aider React à identifier efficacement quel élément a changé, a été ajouté ou supprimé lors du diffing",
+          "C'est juste une convention sans effet réel",
+          "Pour trier automatiquement la liste"
+        ],
+        correct: 1,
+        explain: "La key donne à React une identité stable pour chaque élément de liste. Sans clé fiable (ou avec l'index comme clé sur une liste qui change d'ordre), React peut mal réconcilier le DOM et provoquer des bugs ou des pertes de performance."
+      },
+      {
+        prompt: "Que fait le hook useMemo ?",
+        options: [
+          "Il mémorise une valeur calculée et ne la recalcule que si ses dépendances changent",
+          "Il force un nouveau rendu à chaque appel",
+          "Il remplace complètement useState",
+          "Il ne sert que pour les appels réseau"
+        ],
+        correct: 0,
+        explain: "useMemo met en cache le résultat d'un calcul coûteux entre les rendus, et ne le recalcule que si une de ses dépendances change. C'est une optimisation de performance, à utiliser quand le calcul est réellement coûteux."
+      },
+      {
+        prompt: "Quelle est la différence entre un input \"contrôlé\" et \"non contrôlé\" en React ?",
+        options: [
+          "Aucune différence",
+          "Contrôlé : la valeur de l'input est pilotée par le state React via value + onChange. Non contrôlé : le DOM gère lui-même sa valeur (accès via une ref)",
+          "Un input contrôlé ne peut jamais être modifié par l'utilisateur",
+          "Les inputs non contrôlés sont interdits en React"
+        ],
+        correct: 1,
+        explain: "Un input contrôlé synchronise sa valeur avec le state à chaque frappe (value={state}, onChange={...}), ce qui donne un contrôle total. Un input non contrôlé laisse le DOM gérer sa propre valeur, qu'on récupère ponctuellement via une ref."
+      },
+      {
+        prompt: "À quoi sert le Context API de React ?",
+        options: [
+          "Gérer le CSS global de l'application",
+          "Partager des données entre composants sans avoir à les passer manuellement à chaque niveau intermédiaire (éviter le \"prop drilling\")",
+          "Remplacer systématiquement tout le state local",
+          "Gérer uniquement le routage"
+        ],
+        correct: 1,
+        explain: "Le Context API permet de rendre une donnée (thème, utilisateur connecté...) accessible à n'importe quel composant descendant, sans devoir la transmettre explicitement prop par prop à travers chaque niveau intermédiaire."
+      },
+      {
+        type: "order",
+        prompt: "Remets dans l'ordre les lignes d'un composant React à compteur.",
+        lines: [
+          "function Compteur() {",
+          "  const [n, setN] = useState(0);",
+          "  return <button onClick={() => setN(n + 1)}>{n}</button>;",
+          "}"
+        ],
+        explain: "Un composant est une fonction : on déclare d'abord l'état avec useState (au sommet, jamais dans une condition), puis on retourne le JSX qui l'utilise, et on ferme la fonction."
+      }
+    ]
+  },
+  {
+    id: "next",
+    num: "06",
+    title: "Next.js",
+    subtitle: "Routing, SSR/SSG, App Router, API routes",
+    accent: "#B388FF",
+    Icon: Triangle,
+    boss: {
+      name: "HYDRATUS",
+      epithet: "le Golem Serveur",
+      kind: "golem",
+      taunt: "Mon corps est rendu côté serveur, hors de portée. Ton navigateur ne touchera jamais mon âme.",
+      hit: "« use client »… tu m'HYDRATES de force !"
+    },
+    lore: "Fragment 06 — « La frontière entre le Serveur et le Client est sacrée. Peu de Sprites savent où elle passe — et moins encore comment la franchir. »",
+    intro: "Next.js transforme React en framework fullstack complet : routage par fichiers, rendu serveur et API intégrées. C'est l'outil de référence pour des apps React en production.",
+    questions: [
+      {
+        prompt: "Quel est l'avantage principal de Next.js par rapport à une app React \"classique\" (créée avec Vite seul) ?",
+        options: [
+          "Il ne sert qu'à faire des sites purement statiques",
+          "Il offre un framework complet : rendu côté serveur (SSR), génération statique (SSG), routage par fichiers et API routes intégrées",
+          "Il remplace totalement le JavaScript par un autre langage",
+          "Il nécessite obligatoirement une base de données"
+        ],
+        correct: 1,
+        explain: "Next.js ajoute au-dessus de React tout ce qu'il faut pour une vraie app de production : différentes stratégies de rendu (serveur, statique, client), un routage basé sur la structure de fichiers, et des endpoints d'API intégrés."
+      },
+      {
+        prompt: "Dans l'App Router (dossier app/), comment crée-t-on une nouvelle route /blog ?",
+        options: [
+          "En créant un fichier blog.js à la racine du projet",
+          "En créant un dossier app/blog/ contenant un fichier page.tsx",
+          "En modifiant uniquement next.config.js",
+          "Ce n'est pas possible avec l'App Router"
+        ],
+        correct: 1,
+        explain: "L'App Router associe chaque route à un dossier dans app/ contenant un fichier page.tsx (ou .jsx). Le chemin du dossier (app/blog/) détermine directement l'URL (/blog)."
+      },
+      {
+        prompt: "Quelle est la vraie différence entre un Server Component et un Client Component dans l'App Router ?",
+        options: [
+          "Aucune différence",
+          "Le Server Component s'exécute côté serveur et ne peut pas utiliser useState/useEffect, sauf à ajouter la directive \"use client\" pour en faire un Client Component",
+          "Le Client Component est toujours plus rapide à charger",
+          "Les deux ont exactement les mêmes capacités"
+        ],
+        correct: 1,
+        explain: "Par défaut, tout composant de l'App Router est un Server Component : il s'exécute côté serveur, n'envoie pas de JS au navigateur, mais ne peut pas utiliser de hooks d'interactivité. La directive \"use client\" en haut du fichier bascule vers un Client Component classique."
+      },
+      {
+        prompt: "Que permet un fichier route.ts placé dans app/api/utilisateurs/ ?",
+        options: [
+          "De styliser une page",
+          "De définir un endpoint d'API (GET, POST, etc.) exécuté côté serveur",
+          "De créer un composant React visuel",
+          "De configurer directement une base de données"
+        ],
+        correct: 1,
+        explain: "Un fichier route.ts dans app/api/ exporte des fonctions nommées GET, POST, etc., qui définissent un véritable endpoint d'API REST, exécuté côté serveur — exactement comme une route Express, mais intégrée à Next.js."
+      },
+      {
+        prompt: "Qu'est-ce que le SSG (Static Site Generation) ?",
+        options: [
+          "Générer le HTML à chaque requête utilisateur",
+          "Générer les pages HTML à l'avance, au moment du build, pour un chargement très rapide",
+          "Ne jamais générer de HTML",
+          "Une technique réservée aux API uniquement"
+        ],
+        correct: 1,
+        explain: "Avec le SSG, les pages sont pré-générées en HTML statique au moment du build, puis servies telles quelles (souvent via un CDN). C'est idéal pour du contenu qui ne change pas à chaque requête (blog, documentation, landing page)."
+      },
+      {
+        prompt: "Comment récupère-t-on des données côté serveur dans un Server Component de l'App Router ?",
+        options: [
+          "Avec useEffect et fetch, comme dans une app React classique",
+          "Simplement avec un appel fetch (ou toute requête asynchrone) directement dans le composant, qui peut être une fonction async",
+          "Avec useState uniquement",
+          "Il faut obligatoirement utiliser getStaticProps"
+        ],
+        correct: 1,
+        explain: "Un Server Component peut être une fonction async : on peut donc faire directement await fetch(...) (ou interroger une base de données) au cœur du composant, sans passer par useEffect, puisque le code s'exécute côté serveur avant l'envoi au navigateur."
+      },
+      {
+        prompt: "Que fait <Link> (next/link) par rapport à une balise <a> classique ?",
+        options: [
+          "Rien de particulier, c'est purement cosmétique",
+          "Il permet une navigation côté client sans rechargement complet de la page, et précharge la page ciblée",
+          "Il bloque complètement le routage",
+          "Il ne fonctionne que pour les liens externes"
+        ],
+        correct: 1,
+        explain: "<Link> intercepte la navigation pour la gérer côté client (sans recharger toute la page) et précharge automatiquement la page de destination en arrière-plan, ce qui rend la navigation quasi instantanée."
+      },
+      {
+        prompt: "Quel fichier spécial définit une mise en page partagée (header/footer communs) pour un groupe de routes ?",
+        options: ["page.tsx", "layout.tsx", "config.tsx", "index.tsx"],
+        correct: 1,
+        explain: "layout.tsx enveloppe toutes les pages d'un même dossier (et de ses sous-dossiers) : c'est l'endroit idéal pour un header, une sidebar ou un footer partagés entre plusieurs routes."
+      },
+      {
+        type: "order",
+        prompt: "Remets dans l'ordre une route API Next.js (app/api/ping/route.ts) qui répond en JSON.",
+        lines: [
+          "export async function GET() {",
+          "  const data = { message: 'pong' };",
+          "  return Response.json(data);",
+          "}"
+        ],
+        explain: "Une route handler exporte une fonction nommée selon la méthode HTTP (GET). On construit la donnée, puis on renvoie une Response — ici Response.json() sérialise l'objet automatiquement."
+      }
+    ]
+  },
+  {
+    id: "express",
+    num: "07",
+    title: "Express & API REST",
+    subtitle: "Routes, middlewares, statuts HTTP",
+    accent: "#79C28C",
+    Icon: Server,
+    boss: {
+      name: "MIDDLEWARE",
+      epithet: "le Gardien des Portes",
+      kind: "gate",
+      taunt: "Aucune requête ne passe sans mon sceau. Ton next() ne sera jamais appelé. Tu resteras à la porte.",
+      hit: "Mon jeton… mon token… DÉJOUÉ !"
+    },
+    lore: "Fragment 07 — « Chaque porte de l'API a son gardien. Connais l'ordre des middlewares, ou reste à jamais bloqué dehors. »",
+    intro: "Côté serveur, Express reste le framework Node.js le plus répandu pour exposer des APIs REST robustes et bien structurées.",
+    questions: [
+      {
+        prompt: "Qu'est-ce qu'Express, en une phrase ?",
+        options: [
+          "Une base de données",
+          "Un framework Node.js minimaliste pour créer des serveurs web et des APIs HTTP",
+          "Un framework frontend concurrent de React",
+          "Un outil de build comme Vite"
+        ],
+        correct: 1,
+        explain: "Express est une couche fine au-dessus du module http de Node.js, qui simplifie énormément la définition de routes, de middlewares et la gestion des requêtes/réponses HTTP."
+      },
+      {
+        code: `app.use(express.json());`,
+        prompt: "Que fait précisément cette ligne ?",
+        options: [
+          "Elle sert des fichiers statiques",
+          "Elle active un middleware qui parse automatiquement le corps JSON des requêtes entrantes, le rendant disponible via req.body",
+          "Elle crée une nouvelle route",
+          "Elle configure la connexion à la base de données"
+        ],
+        correct: 1,
+        explain: "Sans ce middleware, req.body serait undefined pour des requêtes envoyées en JSON. express.json() lit le flux de la requête, le parse, et le place dans req.body pour que les routes suivantes puissent l'utiliser directement."
+      },
+      {
+        prompt: "Dans une API REST, quelle méthode HTTP utilise-t-on typiquement pour créer une nouvelle ressource ?",
+        options: ["GET", "POST", "DELETE", "OPTIONS"],
+        correct: 1,
+        explain: "Par convention REST : GET lit, POST crée, PUT/PATCH met à jour, DELETE supprime. POST /utilisateurs, par exemple, crée un nouvel utilisateur."
+      },
+      {
+        prompt: "Qu'est-ce qu'un middleware en Express ?",
+        options: [
+          "Une base de données intermédiaire",
+          "Une fonction ayant accès à la requête, la réponse, et à la fonction next, exécutée dans la chaîne de traitement d'une requête",
+          "Un type de route réservé uniquement à la gestion des erreurs",
+          "Un plugin de build"
+        ],
+        correct: 1,
+        explain: "Un middleware reçoit (req, res, next) et peut inspecter/modifier la requête, répondre directement, ou passer la main au middleware/route suivant via next(). C'est la brique de base de tout traitement Express (auth, logs, parsing...)."
+      },
+      {
+        prompt: "Quel code de statut HTTP signifie \"ressource créée avec succès\" ?",
+        options: ["200", "201", "404", "500"],
+        correct: 1,
+        explain: "200 OK est une réussite générique, mais 201 Created indique précisément qu'une nouvelle ressource a bien été créée (typiquement en réponse à un POST réussi)."
+      },
+      {
+        prompt: "Quelle est la signature typique d'un gestionnaire de route Express ?",
+        options: ["(req, res, next) => {}", "(props) => {}", "(state, action) => {}", "(event) => {}"],
+        correct: 0,
+        explain: "Chaque route Express reçoit la requête (req), la réponse (res), et optionnellement la fonction next pour passer au middleware suivant — c'est la signature universelle des handlers Express."
+      },
+      {
+        prompt: "Pourquoi versionne-t-on souvent une API REST (ex : /api/v1/...) ?",
+        options: [
+          "Pour ralentir volontairement les requêtes",
+          "Pour pouvoir faire évoluer l'API sans casser les clients qui utilisent encore une ancienne version",
+          "C'est une obligation technique d'Express",
+          "Cela n'a aucun intérêt pratique"
+        ],
+        correct: 1,
+        explain: "Le versionnage (v1, v2...) permet d'introduire des changements majeurs dans une nouvelle version, tout en laissant les applications existantes continuer à fonctionner sur l'ancienne, le temps qu'elles migrent."
+      },
+      {
+        prompt: "Quelle est la différence entre req.params, req.query et req.body ?",
+        options: [
+          "Ils sont identiques",
+          "params = segments dynamiques de l'URL (/users/:id), query = paramètres après le ? (?tri=asc), body = données envoyées dans le corps de la requête",
+          "params sert uniquement pour le JSON",
+          "body est toujours vide en Express"
+        ],
+        correct: 1,
+        explain: "Pour une route GET /users/:id?tri=asc avec un corps JSON : req.params.id vient de l'URL elle-même, req.query.tri vient de la chaîne après le ?, et req.body contient les données envoyées (souvent en POST/PUT)."
+      },
+      {
+        type: "order",
+        prompt: "Remets dans l'ordre la mise en place d'un serveur Express minimal. Attention à la place du middleware !",
+        lines: [
+          "const app = express();",
+          "app.use(express.json());",
+          "app.get('/', (req, res) => res.json({ ok: true }));",
+          "app.listen(3000);"
+        ],
+        explain: "On crée l'app, on branche les middlewares (express.json) AVANT les routes pour qu'elles en profitent, puis on déclare les routes, et enfin on écoute un port avec listen()."
+      }
+    ]
+  },
+  {
+    id: "vite",
+    num: "08",
+    title: "Vite & Outils Build",
+    subtitle: "Dev server, bundling, optimisation",
+    accent: "#E0D85C",
+    Icon: Zap,
+    boss: {
+      name: "BUNDLOR",
+      epithet: "le Mastodonte",
+      kind: "mastodon",
+      taunt: "Je suis lourd, lent, monolithique. Des mégaoctets de code mort. Tu ne m'allègeras jamais.",
+      hit: "Tree-shaking ?! Mon code mort… S'ENVOLE !"
+    },
+    lore: "Fragment 08 — « La vitesse n'est pas un luxe de Gardien. C'est le respect que l'on doit à chaque utilisateur qui attend. »",
+    intro: "Aucune app moderne n'existe sans outillage : Vite gère le développement et la mise en production de ton code de façon rapide et optimisée.",
+    questions: [
+      {
+        prompt: "Quel est le rôle principal d'un outil comme Vite ?",
+        options: [
+          "Gérer une base de données",
+          "Servir de serveur de développement ultra-rapide et bundler le code pour la production",
+          "Remplacer entièrement React",
+          "Héberger le site directement en production"
+        ],
+        correct: 1,
+        explain: "Vite a deux casquettes : un serveur de développement très rapide grâce aux modules ES natifs, et un bundler (basé sur Rollup) pour produire un build optimisé destiné à la production."
+      },
+      {
+        prompt: "Pourquoi Vite est-il si rapide en développement, comparé à des bundlers plus anciens en mode dev classique ?",
+        options: [
+          "Il compile l'intégralité du projet avant de le servir",
+          "Il s'appuie sur les modules ES natifs du navigateur et ne transforme à la volée que les fichiers réellement demandés",
+          "Il n'utilise aucun serveur",
+          "Il met uniquement en cache les images"
+        ],
+        correct: 1,
+        explain: "Plutôt que de tout bundler avant de démarrer, Vite sert les fichiers via les imports ES natifs du navigateur et ne transforme que ce qui est effectivement demandé, page par page — d'où un démarrage quasi instantané."
+      },
+      {
+        prompt: "Quelle commande crée typiquement le build de production optimisé avec Vite ?",
+        options: ["vite dev", "vite build", "vite serve", "vite start"],
+        correct: 1,
+        explain: "vite build génère les fichiers statiques optimisés (minifiés, avec hash de cache) dans le dossier de sortie, prêts à être déployés."
+      },
+      {
+        prompt: "Qu'est-ce que le \"tree-shaking\" effectué par les bundlers ?",
+        options: [
+          "Une animation visuelle",
+          "L'élimination du code mort ou non utilisé du bundle final, pour réduire sa taille",
+          "Le tri alphabétique des fichiers du projet",
+          "Une technique de mise en cache uniquement"
+        ],
+        correct: 1,
+        explain: "Le tree-shaking analyse les imports/exports réellement utilisés et retire du bundle final tout le code qui n'est jamais importé, réduisant ainsi le poids final envoyé au navigateur."
+      },
+      {
+        prompt: "Quel fichier permet de personnaliser la configuration de Vite (plugins, alias, etc.) ?",
+        options: ["package.json uniquement", "vite.config.js (ou .ts)", ".babelrc", "webpack.config.js"],
+        correct: 1,
+        explain: "vite.config.js (ou .ts) centralise la configuration : plugins (React, etc.), alias de chemins, variables d'environnement, configuration du serveur de dev, options de build..."
+      },
+      {
+        prompt: "Pourquoi utilise-t-on des variables d'environnement (fichier .env) dans un projet Vite ?",
+        options: [
+          "Pour stocker du code JavaScript exécutable",
+          "Pour séparer la configuration sensible ou spécifique à l'environnement (clés d'API, URLs) du code source",
+          "Elles sont automatiquement chiffrées et totalement invisibles côté client",
+          "Elles remplacent npm"
+        ],
+        correct: 1,
+        explain: "Le fichier .env permet d'adapter la config selon l'environnement (dev/prod) sans toucher au code. Attention cependant : seules les variables préfixées VITE_ sont exposées au code client, et elles ne sont jamais vraiment \"secrètes\" une fois dans le bundle navigateur."
+      },
+      {
+        type: "order",
+        prompt: "Remets dans l'ordre un fichier vite.config.js minimal avec le plugin React.",
+        lines: [
+          "import { defineConfig } from 'vite';",
+          "import react from '@vitejs/plugin-react';",
+          "export default defineConfig({",
+          "  plugins: [react()],",
+          "});"
+        ],
+        explain: "Les imports viennent toujours en premier (defineConfig puis le plugin), puis on exporte la configuration en lui passant le tableau de plugins. C'est le squelette de toute config Vite."
+      }
+    ]
+  },
+  {
+    id: "boss",
+    num: "09",
+    title: "Boss Final — Fullstack",
+    subtitle: "Mises en situation d'architecture réelle",
+    accent: "#E15554",
+    Icon: Crown,
+    boss: {
+      name: "OVERFLOW",
+      epithet: "le Corrupteur",
+      kind: "overlord",
+      taunt: "Tu n'as purifié que des secteurs isolés. MOI, je suis l'architecture entière. CORS, Auth, Monolithe… tout obéit à ma corruption.",
+      hit: "Impossible… un simple Sprite… devenu GARDIEN ?!"
+    },
+    lore: "Fragment 09 — « Et le dernier Sprite se leva, comprit la Stack tout entière — du langage à l'architecture — et devint Gardien. La corruption, enfin, recula. »",
+    intro: "Le défi final : des mises en situation qui combinent frontend, backend, types et architecture — exactement ce qu'on rencontre en gérant un vrai projet fullstack.",
+    questions: [
+      {
+        prompt: "Ton frontend Next.js (localhost:3000) appelle une API Express séparée (localhost:3001) en local. Le navigateur bloque la requête. Quel est le problème et comment le résoudre côté serveur ?",
+        options: [
+          "Aucun problème, ça fonctionne nativement",
+          "C'est une erreur CORS : il faut configurer le middleware cors sur le serveur Express pour autoriser l'origine du frontend",
+          "C'est un problème de base de données",
+          "Il faut désactiver JavaScript dans le navigateur"
+        ],
+        correct: 1,
+        explain: "Le navigateur bloque par défaut les requêtes vers une origine différente (port différent = origine différente). Le middleware cors, configuré côté Express avec la bonne origine autorisée, résout ce problème proprement."
+      },
+      {
+        prompt: "Tu veux protéger une route Express pour qu'elle ne soit accessible qu'aux utilisateurs authentifiés. Quelle approche est appropriée ?",
+        options: [
+          "Vérifier un mot de passe en clair directement dans l'URL",
+          "Utiliser un middleware qui vérifie un token (ex : JWT) dans les en-têtes de la requête avant d'appeler next()",
+          "Faire confiance au frontend pour cacher le bouton correspondant",
+          "Désactiver totalement la route"
+        ],
+        correct: 1,
+        explain: "La sécurité doit toujours être vérifiée côté serveur : un middleware d'authentification lit le token envoyé (souvent dans l'en-tête Authorization), le valide, et bloque la requête (ou appelle next()) selon le résultat. Cacher un bouton côté frontend n'empêche jamais un appel direct à l'API."
+      },
+      {
+        prompt: "Dans une app Next.js qui affiche le profil privé d'un utilisateur, où vaut-il mieux récupérer ces données sensibles ?",
+        options: [
+          "Toujours côté client avec useEffect, quel que soit le contexte",
+          "Dans un Server Component qui vérifie la session côté serveur avant de renvoyer les données",
+          "Dans le fichier next.config.js",
+          "Directement dans une feuille de style CSS"
+        ],
+        correct: 1,
+        explain: "Récupérer et vérifier les données sensibles côté serveur (Server Component) évite d'exposer temporairement des données privées dans le navigateur avant qu'une vérification d'authentification client n'ait lieu."
+      },
+      {
+        prompt: "Tu utilises TypeScript à la fois sur ton frontend React et ton backend Express. Quel est l'avantage de partager les types (ex : l'interface User) entre les deux ?",
+        options: [
+          "Cela ralentit volontairement le projet",
+          "Cela garantit la cohérence des données échangées entre frontend et backend, et évite les erreurs de désynchronisation des structures",
+          "Cela n'a aucun intérêt pratique",
+          "Cela remplace complètement les tests automatisés"
+        ],
+        correct: 1,
+        explain: "Quand le frontend et le backend partagent les mêmes définitions de types (souvent via un package ou dossier commun), une modification de structure côté backend est immédiatement signalée comme erreur de type côté frontend si celui-ci n'est pas mis à jour."
+      },
+      {
+        prompt: "Ton build Vite est lent à charger en production et le bundle final est trop lourd. Quelle action est la plus pertinente ?",
+        options: [
+          "Ajouter encore plus de dépendances au projet",
+          "Analyser le contenu du bundle, activer le code-splitting / lazy loading, et vérifier que les dépendances inutilisées sont bien éliminées (tree-shaking)",
+          "Supprimer Vite et tout réécrire en HTML pur",
+          "Ignorer le problème, ça n'affecte pas les utilisateurs"
+        ],
+        correct: 1,
+        explain: "Avant d'optimiser à l'aveugle, on analyse ce qui compose réellement le bundle (taille par dépendance), puis on découpe le code par route/fonctionnalité (code-splitting, import() dynamique) pour ne charger que le strict nécessaire à chaque page."
+      },
+      {
+        prompt: "Pour une nouvelle application, comment choisir entre \"monolithe Next.js avec API routes intégrées\" et \"Next.js frontend + Express backend séparé\" ?",
+        options: [
+          "Selon la couleur du thème choisi",
+          "Selon le besoin (ou non) d'un backend réutilisable par plusieurs clients (mobile, autres services) : si oui, séparer simplifie souvent l'architecture ; sinon, le monolithe Next.js réduit la complexité",
+          "Selon le nombre de fichiers CSS du projet",
+          "Selon la version de Node installée sur la machine du développeur"
+        ],
+        correct: 1,
+        explain: "Si une seule application web consomme l'API, le monolithe Next.js (API routes intégrées) limite la complexité opérationnelle (un seul déploiement). Si plusieurs clients (app mobile, autres services) doivent consommer la même API, un backend Express séparé devient souvent plus pertinent."
+      },
+      {
+        type: "code",
+        prompt: "Épreuve finale du Gardien. Écris slugify(titre) : tout en minuscules, les espaces remplacés par des tirets. \"Mon Article\" → \"mon-article\".",
+        starter: "function slugify(titre) {\n  // ton code ici\n}",
+        tests: [
+          { call: "slugify('Mon Article')", expect: "mon-article" },
+          { call: "slugify('HELLO WORLD')", expect: "hello-world" },
+          { call: "slugify('deja-ok')", expect: "deja-ok" }
+        ],
+        explain: "titre.toLowerCase().replaceAll(' ', '-') met d'abord en minuscules, puis remplace chaque espace par un tiret. C'est exactement ainsi qu'on génère des URLs propres (slugs) en production."
+      }
+    ]
+  }
+];
+
+const TOTAL_QUESTIONS = MODULES.reduce((s, m) => s + m.questions.length, 0);
+const AI_SETTINGS_KEY = "fullstack-quest-ai-settings";
+const AI_DEFAULT = {
+  provider: "ollama",
+  endpoint: "http://localhost:11434",
+  model: "llama3.2",
+};
+/* ---------------------------------------------------------------------- */
+/*  COMPOSANT PRINCIPAL                                                    */
+/* ---------------------------------------------------------------------- */
+const FRESH = {
+  xp: 0,
+  results: {},
+  badges: [],
+  lore: [],
+  bestCombo: 0,
+  meta: { version: 2, features: { daily: true, srs: true } },
+  dailyRuns: {},
+  srsState: {},
+};
+
+/* Daily Challenge & SRS Helpers */
+function getTodaysSeed() {
+  const today = new Date();
+  const dateStr = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}-${String(today.getUTCDate()).padStart(2, "0")}`;
+  return deriveSeed([dateStr, "daily", "v1"]);
+}
+
+function getDailyReference() {
+  const today = new Date();
+  return `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}-${String(today.getUTCDate()).padStart(2, "0")}`;
+}
+
+function generateDailyRun(seed, modules) {
+  const r = rng(seed);
+  const picked = [];
+  for (const mod of modules) {
+    const qIdx = Math.floor(r() * mod.questions.length);
+    const q = mod.questions[qIdx];
+    picked.push({ ...q, moduleId: mod.id, moduleName: mod.title });
+  }
+  return picked;
+}
+
+function collectAllQuestions(modules) {
+  const all = [];
+  for (const mod of modules) {
+    for (const q of mod.questions) {
+      all.push({ ...q, moduleId: mod.id });
+    }
+  }
+  return all;
+}
+
+/* ====================================================================== */
+/*  VUES — chaque écran est un composant pur piloté par `ctx`             */
+/* ====================================================================== */
+
+/* --- Daily Seeded Challenge ----------------------------------------- */
+function DailyView({ ctx }) {
+  const { dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, setView, profile, persist } = ctx;
+  const [selected, setSelected] = useState(null);
+  const [answered, setAnswered] = useState(false);
+
+  if (!dailyRun || dailyQIdx >= dailyRun.length) {
+    const todayRef = getDailyReference();
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: BG, color: TEXT }}>
+        <div className="text-center px-4">
+          <h2 className="text-2xl sm:text-3xl font-mono font-bold mb-4">Défi Quotidien Complété!</h2>
+          <div className="mb-6">
+            <Frame accent={AMBER} className="inline-block p-4">
+              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+                <p className="font-mono text-xs tracking-widest mb-2" style={{ color: TEXT_MUTED }}>SCORE</p>
+                <p className="text-xl font-bold" style={{ color: AMBER }}>{dailyScore} / {dailyRun.length}</p>
+                <p className="text-xs mt-2" style={{ color: TEXT_MUTED }}>Graine: {getTodaysSeed().toString().slice(0, 8)}</p>
+              </div>
+            </Frame>
+          </div>
+          <button onClick={() => setView("map")} className="px-4 py-2 rounded-lg font-mono" style={{ backgroundColor: AMBER, color: BG }}>
+            Retour à la Carte
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const q = dailyRun[dailyQIdx];
+  function handleAnswer() {
+    if (selected === null) return;
+    const correct = selected === q.correct;
+    if (correct) {
+      setDailyScore(s => s + 1);
+      SFX.correct(1);
+    } else {
+      SFX.wrong();
+    }
+    setAnswered(true);
+  }
+  function handleNext() {
+    setDailyQIdx(i => i + 1);
+    setSelected(null);
+    setAnswered(false);
+  }
+
+  return (
+    <div className="min-h-screen p-4" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-xl mx-auto">
+        <div className="mb-6 flex justify-between items-center">
+          <h3 className="font-mono text-sm font-bold" style={{ color: AMBER }}>DÉFI QUOTIDIEN</h3>
+          <span className="font-mono text-xs" style={{ color: TEXT_MUTED }}>{dailyQIdx + 1} / {dailyRun.length}</span>
+        </div>
+        <div className="mb-4">
+          <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: LINE }}>
+            <div className="h-full rounded-full" style={{ width: `${((dailyQIdx + 1) / dailyRun.length) * 100}%`, backgroundColor: AMBER, transition: "width 300ms ease" }} />
+          </div>
+        </div>
+        <Frame accent={AMBER} className="p-4">
+          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+            <h4 className="font-mono font-bold mb-4">{q.prompt}</h4>
+            <div className="space-y-2">
+              {q.options?.map((opt, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => !answered && setSelected(idx)}
+                  className="w-full p-3 rounded-lg text-left transition-colors"
+                  style={{
+                    backgroundColor: selected === idx ? `${q.correct === idx ? SUCCESS : DANGER}22` : PANEL_SOFT,
+                    border: `1px solid ${selected === idx ? (q.correct === idx ? SUCCESS : DANGER) : LINE}`,
+                    color: TEXT,
+                  }}
+                  disabled={answered}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+            {!answered ? (
+              <button onClick={handleAnswer} disabled={selected === null} className="w-full mt-4 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: selected === null ? LINE : AMBER, color: selected === null ? TEXT_MUTED : BG }}>
+                Valider
+              </button>
+            ) : (
+              <>
+                {selected === q.correct ? (
+                  <p className="text-sm mt-3 font-mono" style={{ color: SUCCESS }}>✓ Correct!</p>
+                ) : (
+                  <>
+                    <p className="text-sm mt-3 font-mono" style={{ color: DANGER }}>✗ Incorrect</p>
+                    <p className="text-xs mt-1 font-mono" style={{ color: TEXT_MUTED }}>Réponse: {q.options[q.correct]}</p>
+                  </>
+                )}
+                {q.explain && <p className="text-xs mt-2 leading-relaxed" style={{ color: TEXT_MUTED }}>{q.explain}</p>}
+                <button onClick={handleNext} className="w-full mt-4 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: AMBER, color: BG }}>
+                  {dailyQIdx + 1 < dailyRun.length ? "Suivant →" : "Terminer"}
+                </button>
+              </>
+            )}
+          </div>
+        </Frame>
+      </div>
+    </div>
+  );
+}
+
+/* --- SRS Spaced Repetition Session ---------------------------------- */
+function SrsView({ ctx }) {
+  const { srsSessionItems, srsSessionIdx, setSrsSessionIdx, setView, profile, persist } = ctx;
+  const [rating, setRating] = useState(null);
+  const [showRating, setShowRating] = useState(false);
+
+  if (!srsSessionItems || srsSessionIdx >= srsSessionItems.length) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: BG, color: TEXT }}>
+        <div className="text-center px-4">
+          <h2 className="text-2xl sm:text-3xl font-mono font-bold mb-4">Session Révision Terminée!</h2>
+          <p className="text-lg mb-6" style={{ color: TEXT_MUTED }}>Incroyable travail d'apprentissage!</p>
+          <button onClick={() => setView("map")} className="px-4 py-2 rounded-lg font-mono" style={{ backgroundColor: AMBER, color: BG }}>
+            Retour à la Carte
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const item = srsSessionItems[srsSessionIdx];
+  const item_idx = item.moduleId ? MODULES.findIndex(m => m.id === item.moduleId) : 0;
+  const mod = MODULES[item_idx] || MODULES[0];
+  const q = item;
+
+  function handleSubmitRating() {
+    if (rating === null) return;
+    const updated = updateSrsItem(item, rating);
+    const newSrsState = { ...profile.srsState };
+    newSrsState[item.qId] = updated;
+    persist({ ...profile, srsState: newSrsState });
+    setSrsSessionIdx(i => i + 1);
+    setRating(null);
+    setShowRating(false);
+  }
+
+  return (
+    <div className="min-h-screen p-4" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-xl mx-auto">
+        <div className="mb-6 flex justify-between items-center">
+          <h3 className="font-mono text-sm font-bold" style={{ color: SUCCESS }}>RÉVISIONS (SRS)</h3>
+          <span className="font-mono text-xs" style={{ color: TEXT_MUTED }}>{srsSessionIdx + 1} / {srsSessionItems.length}</span>
+        </div>
+        <div className="mb-4">
+          <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: LINE }}>
+            <div className="h-full rounded-full" style={{ width: `${((srsSessionIdx + 1) / srsSessionItems.length) * 100}%`, backgroundColor: SUCCESS, transition: "width 300ms ease" }} />
+          </div>
+        </div>
+        <Frame accent={SUCCESS} className="p-4">
+          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+            <p className="text-xs font-mono mb-2" style={{ color: mod.accent }}>{mod.title}</p>
+            <h4 className="font-mono font-bold mb-4">{q.prompt}</h4>
+            <div className="space-y-2 mb-4">
+              {q.options?.map((opt, idx) => (
+                <div key={idx} className="p-3 rounded-lg" style={{ backgroundColor: PANEL_SOFT, border: `1px solid ${LINE}`, color: TEXT }}>
+                  {opt}
+                </div>
+              ))}
+            </div>
+            {!showRating ? (
+              <button onClick={() => setShowRating(true)} className="w-full py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: SUCCESS, color: BG }}>
+                J'ai terminé → Noter ma réponse
+              </button>
+            ) : (
+              <>
+                <p className="text-xs mb-3 text-center" style={{ color: TEXT_MUTED }}>Comment as-tu trouvé cette question?</p>
+                <div className="grid grid-cols-5 gap-2 mb-3">
+                  {[
+                    { val: 5, label: "Facile ✓", color: SUCCESS },
+                    { val: 4, label: "OK ✓", color: AMBER },
+                    { val: 3, label: "Moyen", color: TEXT_MUTED },
+                    { val: 2, label: "Dur", color: DANGER },
+                    { val: 1, label: "Très dur", color: DANGER },
+                  ].map(({ val, label, color }) => (
+                    <button
+                      key={val}
+                      onClick={() => setRating(val)}
+                      className="p-2 rounded-lg text-xs font-mono transition-colors"
+                      style={{
+                        backgroundColor: rating === val ? `${color}44` : PANEL_SOFT,
+                        border: `1px solid ${rating === val ? color : LINE}`,
+                        color: rating === val ? color : TEXT_MUTED,
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={handleSubmitRating} disabled={rating === null} className="w-full py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: rating === null ? LINE : AMBER, color: rating === null ? TEXT_MUTED : BG }}>
+                  Valider
+                </button>
+              </>
+            )}
+          </div>
+        </Frame>
+      </div>
+    </div>
+  );
+}
+
+/* --- Codex : fragments de lore + hauts faits ------------------------- */
+function CodexView({ ctx }) {
+  const { profile, setView, badgeCount } = ctx;
+  return (
+    <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+        <button onClick={() => setView("map")} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+          <ArrowLeft size={14} /> Retour à la carte
+        </button>
+
+        <div className="flex items-center gap-2 mb-4">
+          <BookOpen size={20} style={{ color: AMBER }} />
+          <h2 className="font-mono font-bold text-xl">Codex de la Stack</h2>
+        </div>
+
+        <p className="font-mono text-[11px] tracking-widest mb-3" style={{ color: TEXT_MUTED }}>FRAGMENTS DE CODE ANCIEN — {(profile.lore || []).length}/{MODULES.length}</p>
+        <div className="flex flex-col gap-2 mb-8">
+          {MODULES.map((mod) => {
+            const got = (profile.lore || []).includes(mod.id);
+            return (
+              <Frame key={mod.id} accent={got ? mod.accent : LINE} className="p-3.5">
+                <div style={{ backgroundColor: PANEL }} className="p-3.5 -m-3.5 rounded-sm">
+                  {got ? (
+                    <p className="text-sm leading-relaxed" style={{ color: TEXT }}>{mod.lore}</p>
+                  ) : (
+                    <p className="text-sm font-mono flex items-center gap-2" style={{ color: TEXT_MUTED }}>
+                      <Lock size={13} /> Fragment scellé — purifie le secteur {mod.num}.
+                    </p>
+                  )}
+                </div>
+              </Frame>
+            );
+          })}
+        </div>
+
+        <p className="font-mono text-[11px] tracking-widest mb-3" style={{ color: TEXT_MUTED }}>HAUTS FAITS — {badgeCount}/{Object.keys(BADGES).length}</p>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+          {Object.keys(BADGES).map((id) => (
+            <BadgeChip key={id} id={id} earned={(profile.badges || []).includes(id)} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* --- Carte du monde : parcours des secteurs -------------------------- */
+function MapView({ ctx }) {
+  const {
+    profile, soundOn, setSoundOn, setView, adaGreet, completedCount, levelInfo,
+    badgeCount, isUnlocked, nextIdx, startModule, confirmReset, setConfirmReset, resetProgress,
+    importText, setImportText, exportProgress, importProgress,
+    aiSettings, setAiSettings, aiReady, aiStatus,
+    startDailyChallenge, startSrsSession,
+  } = ctx;
+  return (
+    <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+        {/* Header */}
+        <Frame accent={AMBER} className="p-5 mb-3">
+          <div style={{ backgroundColor: PANEL }} className="p-5 -m-5 rounded-sm">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <p className="font-mono text-[11px] tracking-[0.2em] mb-1" style={{ color: TEXT_MUTED }}>
+                  LES GARDIENS DE LA STACK
+                </p>
+                <h1 className="font-mono uppercase tracking-wide text-2xl sm:text-3xl font-bold">
+                  Fullstack://Quest
+                </h1>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button onClick={() => setSoundOn((s) => !s)} title="Son" className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${LINE}`, color: soundOn ? AMBER : TEXT_MUTED }}>
+                  {soundOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                </button>
+                <button onClick={() => setView("codex")} title="Codex" className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${LINE}`, color: AMBER }}>
+                  <BookOpen size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Ada parle */}
+            <div className="mb-4">
+              <DialogueBubble name="ADA — Gardienne" text={adaGreet} accent="#8ECAE6" avatar={<AdaAvatar mood={completedCount === MODULES.length ? "proud" : "idle"} size={54} />} />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 font-mono">
+              <div>
+                <p className="text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>RANG</p>
+                <p className="text-xs sm:text-sm font-bold" style={{ color: AMBER }}>{levelInfo.label}</p>
+              </div>
+              <div>
+                <p className="text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>XP</p>
+                <p className="text-xs sm:text-sm font-bold">{profile.xp}</p>
+              </div>
+              <div>
+                <p className="text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>SECTEURS</p>
+                <p className="text-xs sm:text-sm font-bold" style={{ color: SUCCESS }}>{completedCount} / {MODULES.length}</p>
+              </div>
+            </div>
+
+            {levelInfo.next && (
+              <div className="mt-3">
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: LINE }}>
+                  <div className="h-full rounded-full" style={{ width: `${levelInfo.pct}%`, backgroundColor: AMBER, transition: "width 500ms ease" }} />
+                </div>
+                <p className="text-[10px] font-mono mt-1" style={{ color: TEXT_MUTED }}>
+                  {levelInfo.pct}% vers {levelInfo.next.label} · {badgeCount} haut{badgeCount > 1 ? "s" : ""} fait{badgeCount > 1 ? "s" : ""} · meilleur combo ×{profile.bestCombo || 0}
+                </p>
+              </div>
+            )}
+          </div>
+        </Frame>
+
+        {/* Daily Challenge & SRS Quick Access */}
+        <div className="mt-8 grid grid-cols-2 gap-3 mb-8">
+          <button
+            onClick={() => ctx.startDailyChallenge?.()}
+            className="p-4 rounded-lg text-center transition-colors hover:opacity-80"
+            style={{ backgroundColor: `${AMBER}22`, border: `1px solid ${AMBER}` }}
+          >
+            <p className="font-mono text-xs tracking-widest mb-1" style={{ color: AMBER }}>⭐ DÉFI</p>
+            <p className="text-xs" style={{ color: TEXT }}>Graine: {getTodaysSeed().toString().slice(0, 6)}</p>
+          </button>
+          <button
+            onClick={() => ctx.startSrsSession?.()}
+            className="p-4 rounded-lg text-center transition-colors hover:opacity-80"
+            style={{ backgroundColor: `${SUCCESS}22`, border: `1px solid ${SUCCESS}` }}
+          >
+            <p className="font-mono text-xs tracking-widest mb-1" style={{ color: SUCCESS }}>🧠 RÉVISIONS</p>
+            <p className="text-xs" style={{ color: TEXT }}>Espacé</p>
+          </button>
+        </div>
+
+        {/* Chemin des secteurs */}
+        <div className="mt-8">
+          {MODULES.map((mod, idx) => {
+            const unlocked = isUnlocked(idx);
+            const result = profile.results[mod.id];
+            const passed = !!result?.passed;
+            const best = result?.bestScore;
+            const isNext = unlocked && !passed && idx === nextIdx;
+
+            return (
+              <div key={mod.id}>
+                {idx > 0 && (
+                  <div className="ml-8 w-0.5 h-6" style={{ backgroundImage: `repeating-linear-gradient(to bottom, ${unlocked ? mod.accent : LINE} 0, ${unlocked ? mod.accent : LINE} 4px, transparent 4px, transparent 9px)` }} />
+                )}
+                <button
+                  disabled={!unlocked}
+                  onClick={() => unlocked && startModule(idx)}
+                  className="w-full text-left flex items-center gap-3 p-3 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed group"
+                  style={{ backgroundColor: unlocked ? PANEL : "transparent", opacity: unlocked ? 1 : 0.5, border: isNext ? `1px solid ${AMBER}` : "1px solid transparent" }}
+                >
+                  <div className="relative shrink-0 w-16 h-16 rounded-xl flex items-center justify-center" style={{ backgroundColor: unlocked ? `${mod.accent}18` : PANEL_SOFT, border: `1px solid ${unlocked ? mod.accent : LINE}` }}>
+                    {unlocked ? (
+                      <BossAvatar kind={mod.boss.kind} accent={mod.accent} state={passed ? "defeated" : "idle"} size={54} />
+                    ) : (
+                      <Lock size={20} style={{ color: TEXT_MUTED }} />
+                    )}
+                    <span className="absolute -bottom-1.5 -right-1.5 text-[10px] font-mono px-1 rounded" style={{ backgroundColor: BG, color: passed ? SUCCESS : TEXT_MUTED, border: `1px solid ${LINE}` }}>
+                      {passed ? "✓" : mod.num}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="font-mono font-bold text-sm sm:text-base truncate" style={{ color: unlocked ? TEXT : TEXT_MUTED }}>{mod.title}</p>
+                    <p className="text-[11px] font-mono truncate" style={{ color: unlocked ? mod.accent : TEXT_MUTED }}>
+                      {unlocked ? `${mod.boss.name} — ${mod.boss.epithet}` : "Secteur scellé"}
+                    </p>
+                    <p className="text-[11px] font-mono mt-0.5" style={{ color: passed ? SUCCESS : isNext ? AMBER : TEXT_MUTED }}>
+                      {!unlocked ? "Verrouillé" : passed ? `Purifié — record ${best}%${result?.flawless ? " · sans dégât" : ""}` : isNext ? "▶ PROCHAIN DUEL" : best ? `Échec — dernier ${best}%` : "Prêt au combat"}
+                    </p>
+                  </div>
+
+                  {unlocked && <ChevronRight size={20} className="shrink-0 transition-transform group-hover:translate-x-0.5" style={{ color: mod.accent }} />}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-10 pt-4 border-t font-mono text-[10px] tracking-widest text-center" style={{ borderColor: LINE, color: TEXT_MUTED }}>
+          {TOTAL_QUESTIONS} DÉFIS · 9 BOSS · SURVIS À CHAQUE DUEL POUR PURIFIER LA STACK
+        </div>
+
+        <div className="mt-6 text-center">
+          {!confirmReset ? (
+            <button onClick={() => setConfirmReset(true)} className="text-[11px] font-mono underline" style={{ color: TEXT_MUTED }}>
+              Réinitialiser la progression
+            </button>
+          ) : (
+            <div className="inline-flex items-center gap-3 text-[11px] font-mono">
+              <span style={{ color: TEXT_MUTED }}>Effacer toute la progression ?</span>
+              <button onClick={resetProgress} className="px-2 py-1 rounded" style={{ backgroundColor: DANGER, color: "#fff" }}>Confirmer</button>
+              <button onClick={() => setConfirmReset(false)} className="px-2 py-1 rounded" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>Annuler</button>
+            </div>
+          )}
+        </div>
+
+        <Frame accent={LINE} className="mt-8 p-4">
+          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+            <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: TEXT_MUTED }}>SAUVEGARDE</p>
+            <div className="flex flex-col gap-2">
+              <button onClick={exportProgress} className="px-3 py-2 rounded-lg font-mono text-sm" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                Exporter la progression
+              </button>
+              <textarea
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                placeholder="Coller ici une sauvegarde JSON"
+                rows={4}
+                spellCheck={false}
+                className="w-full font-mono text-xs p-3 rounded-md resize-y focus:outline-none"
+                style={{ backgroundColor: "#081B33", border: `1px solid ${LINE}`, color: TEXT }}
+              />
+              <button onClick={importProgress} className="px-3 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: AMBER, color: "#0B2545" }}>
+                Importer la sauvegarde
+              </button>
+            </div>
+          </div>
+        </Frame>
+
+        <Frame accent="#8ECAE6" className="mt-4 p-4">
+          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <MessageSquareText size={14} style={{ color: "#8ECAE6" }} />
+              <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>COACH IA LOCAL</p>
+            </div>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
+              Branché sur un serveur local. Compatible avec Ollama ou un serveur OpenAI-compatible en local.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                Moteur
+                <select
+                  value={aiSettings.provider}
+                  onChange={(e) => setAiSettings((s) => ({ ...s, provider: e.target.value }))}
+                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                >
+                  <option value="ollama">Ollama</option>
+                  <option value="openai">OpenAI-compatible</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                Endpoint
+                <input
+                  value={aiSettings.endpoint}
+                  onChange={(e) => setAiSettings((s) => ({ ...s, endpoint: e.target.value }))}
+                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                Modèle
+                <input
+                  value={aiSettings.model}
+                  onChange={(e) => setAiSettings((s) => ({ ...s, model: e.target.value }))}
+                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                />
+              </label>
+            </div>
+            <div className="mt-2 text-[11px] font-mono" style={{ color: aiReady ? SUCCESS : TEXT_MUTED }}>
+              {aiStatus}
+            </div>
+          </div>
+        </Frame>
+      </div>
+    </div>
+  );
+}
+
+/* --- Intro : révélation du boss avant le duel ------------------------ */
+function IntroView({ ctx }) {
+  const { activeIdx, backToMap, engage } = ctx;
+  const mod = MODULES[activeIdx];
+  return (
+    <div className="min-h-screen w-full font-sans flex items-center" style={{ backgroundColor: BG, color: TEXT, background: `radial-gradient(circle at 50% 35%, ${mod.accent}1A, ${BG} 60%)` }}>
+      <div className="max-w-2xl mx-auto px-4 py-12 w-full">
+        <button onClick={backToMap} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+          <ArrowLeft size={14} /> Battre en retraite
+        </button>
+
+        <div className="text-center mb-5">
+          <p className="font-mono text-[11px] tracking-[0.25em] mb-1" style={{ color: TEXT_MUTED }}>SECTEUR {mod.num} — {mod.title.toUpperCase()}</p>
+          <p className="font-mono text-[11px] tracking-widest" style={{ color: mod.accent }}>⚠ SIGNATURE DE BUG DÉTECTÉE</p>
+        </div>
+
+        <div className="flex justify-center mb-3">
+          <BossAvatar kind={mod.boss.kind} accent={mod.accent} state="idle" size={150} />
+        </div>
+        <h2 className="text-center font-mono font-extrabold text-2xl sm:text-3xl tracking-wide" style={{ color: mod.accent }}>{mod.boss.name}</h2>
+        <p className="text-center font-mono text-sm mb-6" style={{ color: TEXT_MUTED }}>{mod.boss.epithet}</p>
+
+        <div className="flex flex-col gap-3 mb-6">
+          <DialogueBubble name={mod.boss.name} text={`« ${mod.boss.taunt} »`} accent={mod.accent} side="right"
+            avatar={<div className="w-12 h-12 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${mod.accent}` }}><Skull size={20} style={{ color: mod.accent }} /></div>} />
+          <DialogueBubble name="ADA" text={`${mod.intro} Survis à ce duel — 3 cœurs, ${mod.questions.length} assauts — et le secteur sera purifié.`} accent="#8ECAE6"
+            avatar={<AdaAvatar mood="idle" size={48} />} />
+        </div>
+
+        <button onClick={engage} className="w-full py-3.5 rounded-lg font-mono font-bold text-sm flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2"
+          style={{ backgroundColor: mod.accent, color: "#0B2545" }}>
+          <Swords size={17} /> ENGAGER LE DUEL
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* --- Duel : l'écran de combat (QCM / code / ordre) ------------------- */
+function BattleView({ ctx }) {
+  const {
+    activeIdx, qIdx, selected, answered, shake, flash, backToMap, combo, lives,
+    soundOn, setSoundOn, floaters, bossState, bossHP, adaLine, adaMood, runXP,
+    codeInput, setCodeInput, runTests, codeAttempts, testResults,
+    orderWork, moveLine, validateOrder, selectAnswer, dead, nextQuestion,
+    askLocalHint, aiHint, aiBusy, aiError, clearAiHint,
+  } = ctx;
+  const mod = MODULES[activeIdx];
+  const q = mod.questions[qIdx];
+  const isLast = qIdx === mod.questions.length - 1;
+  const critical = bossHP <= 0.5;
+  const success =
+    q.type === "code" ? selected === "code"
+    : q.type === "order" ? (answered && orderWork.every((v, idx) => v === idx))
+    : selected === q.correct;
+
+  return (
+    <div className={`min-h-screen w-full font-sans ${shake ? "fsq-shake" : ""}`} style={{ backgroundColor: BG, color: TEXT }}>
+      {/* flash plein écran */}
+      {flash && (
+        <div className="fixed inset-0 pointer-events-none" style={{ backgroundColor: flash === "green" ? SUCCESS : DANGER, opacity: 0.16, transition: "opacity 200ms ease", zIndex: 40 }} />
+      )}
+
+      <div className="max-w-2xl mx-auto px-4 py-6 sm:py-8">
+        {/* barre du haut */}
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={backToMap} className="flex items-center gap-1 text-xs font-mono" style={{ color: TEXT_MUTED }}>
+            <ArrowLeft size={14} /> Fuir
+          </button>
+          <div className="flex items-center gap-3">
+            <ComboMeter combo={combo} />
+            <Hearts lives={lives} />
+            <button onClick={() => setSoundOn((s) => !s)} className="opacity-70" style={{ color: soundOn ? AMBER : TEXT_MUTED }}>
+              {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />}
+            </button>
+          </div>
+        </div>
+
+        {/* arène du boss */}
+        <Frame accent={mod.accent} className="p-4 mb-4">
+          <div style={{ backgroundColor: PANEL, background: `radial-gradient(circle at 50% 40%, ${mod.accent}14, ${PANEL} 70%)` }} className="p-4 -m-4 rounded-sm relative overflow-hidden">
+            {/* floaters */}
+            {floaters.map((f) => (
+              <span key={f.id} className="fsq-float font-mono text-base sm:text-lg" style={{ left: `${f.x}%`, top: "38%", color: f.kind === "hurt" ? DANGER : f.text.startsWith("CRIT") ? AMBER : SUCCESS, zIndex: 30, textShadow: "0 1px 3px rgba(0,0,0,.6)" }}>
+                {f.text}
+              </span>
+            ))}
+
+            <div className="flex flex-col items-center">
+              <div className="mb-2">
+                <BossAvatar kind={mod.boss.kind} accent={mod.accent} state={bossState} size={108} />
+              </div>
+              <p className="font-mono font-bold text-sm tracking-wide mb-0.5" style={{ color: mod.accent }}>
+                {mod.boss.name} {critical && <span style={{ color: DANGER }}>· CRITIQUE</span>}
+              </p>
+              <div className="w-full max-w-xs mt-1">
+                <HPBar value={bossHP} max={100} color={critical ? DANGER : mod.accent} label="INTÉGRITÉ DU BUG" Icon={Skull} flash={bossState === "hit"} />
+              </div>
+            </div>
+          </div>
+        </Frame>
+
+        {/* Ada commente */}
+        {adaLine && (
+          <div className="mb-4">
+            <DialogueBubble name="ADA" text={adaLine} accent="#8ECAE6" avatar={<AdaAvatar mood={adaMood} size={44} />} />
+          </div>
+        )}
+
+        {/* Coach IA local */}
+        <Frame accent="#8ECAE6" className="p-4 mb-4">
+          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>COACH IA LOCAL</p>
+              <button onClick={askLocalHint} disabled={aiBusy || answered} className="px-2 py-1 rounded-md font-mono text-[11px] disabled:opacity-50" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                {aiBusy ? "Analyse…" : "Demander un indice"}
+              </button>
+            </div>
+            <p className="text-xs leading-relaxed mb-2" style={{ color: TEXT_MUTED }}>
+              Indice progressif, sans donner la solution brute. Le modèle tourne sur ta machine.
+            </p>
+            {aiError && <p className="text-xs mb-2" style={{ color: DANGER }}>{aiError}</p>}
+            {aiHint && <p className="text-xs leading-relaxed" style={{ color: TEXT }}>{aiHint}</p>}
+            {aiHint && !aiBusy && (
+              <button onClick={clearAiHint} className="mt-2 text-[11px] font-mono underline" style={{ color: TEXT_MUTED }}>Effacer l'indice</button>
+            )}
+          </div>
+        </Frame>
+
+        {/* progression assauts */}
+        <div className="flex items-center justify-between font-mono text-[11px] mb-2" style={{ color: TEXT_MUTED }}>
+          <span>ASSAUT {qIdx + 1} / {mod.questions.length}</span>
+          <span style={{ color: AMBER }}>+{runXP} XP</span>
+        </div>
+
+        {/* carte question */}
+        <Frame accent={mod.accent} className="p-5">
+          <div style={{ backgroundColor: PANEL }} className="p-5 -m-5 rounded-sm">
+            {/* badge de type */}
+            {q.type === "code" && (
+              <p className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-widest mb-2 px-2 py-0.5 rounded" style={{ color: SUCCESS, border: `1px solid ${SUCCESS}55` }}>
+                <Terminal size={11} /> PRATIQUE · ÉCRIS LE CODE
+              </p>
+            )}
+            {q.type === "order" && (
+              <p className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-widest mb-2 px-2 py-0.5 rounded" style={{ color: AMBER, border: `1px solid ${AMBER}55` }}>
+                <ListOrdered size={11} /> PRATIQUE · ORDONNE LE CODE
+              </p>
+            )}
+
+            <p className="font-mono text-sm sm:text-base font-semibold mb-4 leading-relaxed">{q.prompt}</p>
+
+            {q.code && (
+              <pre className="font-mono text-xs sm:text-sm p-3 rounded-md mb-4 overflow-x-auto whitespace-pre" style={{ backgroundColor: "#081B33", borderLeft: `3px solid ${mod.accent}`, color: "#C9E2F5" }}>
+                {q.code}
+              </pre>
+            )}
+
+            {/* ----- QCM ----- */}
+            {(!q.type || q.type === "qcm") && (
+              <div className="flex flex-col gap-2">
+                {q.options.map((opt, i) => {
+                  let bg = PANEL_SOFT, border = LINE, textColor = TEXT;
+                  if (answered) {
+                    if (i === q.correct) { bg = `${SUCCESS}22`; border = SUCCESS; textColor = SUCCESS; }
+                    else if (i === selected) { bg = `${DANGER}22`; border = DANGER; textColor = DANGER; }
+                  }
+                  return (
+                    <button key={i} onClick={() => selectAnswer(i)} disabled={answered}
+                      className="text-left font-mono text-xs sm:text-sm px-3 py-2.5 rounded-md border transition-colors flex items-start gap-2 focus-visible:outline-none focus-visible:ring-2 disabled:cursor-default"
+                      style={{ backgroundColor: bg, borderColor: border, color: textColor }}>
+                      <span className="font-bold shrink-0">{String.fromCharCode(65 + i)}.</span>
+                      <span>{opt}</span>
+                      {answered && i === q.correct && <Check size={14} className="ml-auto shrink-0 mt-0.5" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ----- DÉFI CODE ----- */}
+            {q.type === "code" && (
+              <div>
+                <textarea
+                  value={codeInput}
+                  onChange={(e) => setCodeInput(e.target.value)}
+                  disabled={answered}
+                  spellCheck={false}
+                  rows={Math.max(5, (q.starter || "").split("\n").length + 1)}
+                  className="w-full font-mono text-xs sm:text-sm p-3 rounded-md resize-y focus:outline-none"
+                  style={{ backgroundColor: "#081B33", border: `1px solid ${LINE}`, color: "#C9E2F5", lineHeight: 1.5 }}
+                />
+                {!answered && (
+                  <button onClick={runTests}
+                    className="w-full mt-3 py-2.5 rounded-md font-mono font-bold text-sm flex items-center justify-center gap-2"
+                    style={{ backgroundColor: SUCCESS, color: "#0B2545" }}>
+                    <Play size={15} /> Lancer les tests {codeAttempts > 0 && `· essai ${codeAttempts + 1}`}
+                  </button>
+                )}
+                {testResults.length > 0 && (
+                  <div className="mt-3 flex flex-col gap-1.5">
+                    {testResults.map((r, i) => (
+                      <div key={i} className="font-mono text-[11px] sm:text-xs px-2.5 py-1.5 rounded flex items-start gap-2" style={{ backgroundColor: "#081B33", border: `1px solid ${r.pass ? SUCCESS : DANGER}55` }}>
+                        {r.pass ? <CheckCircle2 size={13} className="shrink-0 mt-0.5" style={{ color: SUCCESS }} /> : <XCircle size={13} className="shrink-0 mt-0.5" style={{ color: DANGER }} />}
+                        <span style={{ color: "#C9E2F5" }}>{r.call}</span>
+                        {!r.pass && (
+                          <span className="ml-auto text-right" style={{ color: TEXT_MUTED }}>
+                            obtenu {show(r.got)} · attendu {show(r.expect)}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ----- DÉFI ORDRE ----- */}
+            {q.type === "order" && (
+              <div>
+                <div className="flex flex-col gap-1.5">
+                  {orderWork.map((origIdx, pos) => {
+                    let border = LINE;
+                    if (answered) border = origIdx === pos ? SUCCESS : DANGER;
+                    return (
+                      <div key={origIdx} className="flex items-stretch gap-2">
+                        <pre className="flex-1 font-mono text-xs sm:text-sm px-3 py-2 rounded-md overflow-x-auto whitespace-pre" style={{ backgroundColor: "#081B33", border: `1px solid ${border}`, color: "#C9E2F5" }}>
+                          {q.lines[origIdx]}
+                        </pre>
+                        {!answered && (
+                          <div className="flex flex-col gap-1">
+                            <button onClick={() => moveLine(pos, -1)} disabled={pos === 0} className="w-7 h-6 rounded flex items-center justify-center disabled:opacity-30" style={{ border: `1px solid ${LINE}`, color: AMBER }}><ArrowUp size={13} /></button>
+                            <button onClick={() => moveLine(pos, 1)} disabled={pos === orderWork.length - 1} className="w-7 h-6 rounded flex items-center justify-center disabled:opacity-30" style={{ border: `1px solid ${LINE}`, color: AMBER }}><ArrowDown size={13} /></button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {!answered && (
+                  <button onClick={validateOrder}
+                    className="w-full mt-3 py-2.5 rounded-md font-mono font-bold text-sm flex items-center justify-center gap-2"
+                    style={{ backgroundColor: AMBER, color: "#0B2545" }}>
+                    <Check size={15} /> Valider l'ordre
+                  </button>
+                )}
+              </div>
+            )}
+
+            {answered && (
+              <div className="mt-4 p-3 rounded-md text-xs sm:text-sm leading-relaxed fsq-rise" style={{ backgroundColor: PANEL_SOFT, color: TEXT_MUTED, borderLeft: `3px solid ${success ? SUCCESS : DANGER}` }}>
+                <span className="font-mono font-bold" style={{ color: success ? SUCCESS : DANGER }}>
+                  {success ? "✓ COUP AU BUT — " : "✗ LE BUG RIPOSTE — "}
+                </span>
+                {q.explain}
+                {q.type === "order" && !success && (
+                  <pre className="font-mono text-[11px] mt-2 p-2 rounded overflow-x-auto whitespace-pre" style={{ backgroundColor: "#081B33", color: SUCCESS }}>
+                    {q.lines.join("\n")}
+                  </pre>
+                )}
+              </div>
+            )}
+
+            {answered && (
+              <button onClick={nextQuestion}
+                className="w-full mt-4 py-3 rounded-md font-mono font-bold text-sm flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2"
+                style={{ backgroundColor: dead ? DANGER : mod.accent, color: "#0B2545" }}>
+                {dead ? "Subir la déconnexion" : isLast ? "Porter le coup final" : "Assaut suivant"} <ChevronRight size={16} />
+              </button>
+            )}
+          </div>
+        </Frame>
+      </div>
+    </div>
+  );
+}
+
+/* --- Résultat : victoire ou défaite ---------------------------------- */
+function ResultView({ ctx }) {
+  const { activeIdx, lastRun, startModule, backToMap } = ctx;
+  const mod = MODULES[activeIdx];
+  const r = lastRun || {};
+  const passed = !!r.passed;
+  const isFinal = mod.id === "boss";
+  const hasNext = passed && activeIdx + 1 < MODULES.length;
+  const accentCol = passed ? SUCCESS : DANGER;
+
+  return (
+    <div className="min-h-screen w-full font-sans flex items-center" style={{ backgroundColor: BG, color: TEXT, background: `radial-gradient(circle at 50% 30%, ${accentCol}18, ${BG} 65%)` }}>
+      <div className="max-w-2xl mx-auto px-4 py-10 w-full">
+        {/* level up banner */}
+        {r.leveledTo && (
+          <div className="text-center mb-4 fsq-rise">
+            <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-mono font-bold text-sm" style={{ backgroundColor: `${AMBER}22`, border: `1px solid ${AMBER}`, color: AMBER }}>
+              <Sparkles size={16} /> NOUVEAU RANG : {r.leveledTo} !
+            </span>
+          </div>
+        )}
+
+        <Frame accent={accentCol} className="p-6 sm:p-8">
+          <div style={{ backgroundColor: PANEL }} className="p-6 sm:p-8 -m-6 sm:-m-8 rounded-sm text-center">
+            <div className="flex justify-center mb-3 fsq-rise">
+              <BossAvatar kind={mod.boss.kind} accent={mod.accent} state={passed ? "defeated" : "idle"} size={120} />
+            </div>
+
+            <p className="font-mono text-[11px] tracking-[0.25em] mb-1" style={{ color: accentCol }}>
+              {passed ? (isFinal ? "LA STACK EST SAUVÉE" : "SECTEUR PURIFIÉ") : "DÉCONNEXION"}
+            </p>
+            <h2 className="font-mono font-extrabold text-2xl mb-1" style={{ color: passed ? TEXT : DANGER }}>
+              {passed ? `${mod.boss.name} terrassé` : `${mod.boss.name} t'a vaincu`}
+            </h2>
+            <p className="font-mono text-xs mb-5" style={{ color: TEXT_MUTED }}>{mod.title}</p>
+
+            {/* stats du duel */}
+            <div className="grid grid-cols-3 gap-2 mb-5 font-mono">
+              <div className="rounded-lg py-2" style={{ backgroundColor: PANEL_SOFT }}>
+                <p className="text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>PRÉCISION</p>
+                <p className="text-lg font-bold" style={{ color: accentCol }}>{r.pct ?? 0}%</p>
+              </div>
+              <div className="rounded-lg py-2" style={{ backgroundColor: PANEL_SOFT }}>
+                <p className="text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>COMBO MAX</p>
+                <p className="text-lg font-bold" style={{ color: AMBER }}>×{r.comboMax ?? 0}</p>
+              </div>
+              <div className="rounded-lg py-2" style={{ backgroundColor: PANEL_SOFT }}>
+                <p className="text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>XP GAGNÉ</p>
+                <p className="text-lg font-bold" style={{ color: SUCCESS }}>+{r.xpGain ?? 0}</p>
+              </div>
+            </div>
+
+            {/* badges débloqués */}
+            {r.newBadges && r.newBadges.length > 0 && (
+              <div className="mb-5">
+                <p className="font-mono text-[10px] tracking-widest mb-2" style={{ color: AMBER }}>HAUT FAIT DÉBLOQUÉ</p>
+                <div className="flex justify-center gap-4">
+                  {r.newBadges.map((id) => <BadgeChip key={id} id={id} earned />)}
+                </div>
+              </div>
+            )}
+
+            {/* lore via Ada */}
+            {r.loreUnlocked && (
+              <div className="mb-5 text-left">
+                <DialogueBubble name="ADA — fragment retrouvé" text={r.loreUnlocked} accent="#8ECAE6" avatar={<AdaAvatar mood="proud" size={48} />} />
+              </div>
+            )}
+
+            {!passed && (
+              <p className="text-xs mb-5 leading-relaxed" style={{ color: TEXT_MUTED }}>
+                « {mod.boss.name} » a profité de tes failles. Relis les explications, puis reviens : un Gardien tombe, se relève, et apprend.
+              </p>
+            )}
+            {isFinal && passed && (
+              <p className="text-sm mb-5 leading-relaxed" style={{ color: TEXT }}>
+                Du langage à l'architecture, tu as tout traversé. La corruption recule. Tu es désormais <strong style={{ color: AMBER }}>Gardien de la Stack</strong>.
+              </p>
+            )}
+
+            <div className="flex flex-col gap-2">
+              {!passed && (
+                <button onClick={() => startModule(activeIdx)} className="w-full py-3 rounded-lg font-mono font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: mod.accent, color: "#0B2545" }}>
+                  <RotateCcw size={16} /> Reprendre le duel
+                </button>
+              )}
+              {hasNext && (
+                <button onClick={() => startModule(activeIdx + 1)} className="w-full py-3 rounded-lg font-mono font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: MODULES[activeIdx + 1].accent, color: "#0B2545" }}>
+                  Secteur suivant : {MODULES[activeIdx + 1].boss.name} <ChevronRight size={16} />
+                </button>
+              )}
+              <button onClick={backToMap} className="w-full py-3 rounded-lg font-mono font-bold text-sm" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                Retour à la carte
+              </button>
+            </div>
+          </div>
+        </Frame>
+      </div>
+    </div>
+  );
+}
+
+/* ====================================================================== */
+/*  COMPOSANT PRINCIPAL — état, logique de combat, routage                */
+/* ====================================================================== */
+export default function FullstackQuest() {
+  const [profile, setProfile] = useState(null);
+  const [soundOn, setSoundOn] = useState(true);
+  const [view, setView] = useState("map"); // map | intro | battle | result | codex
+  const [activeIdx, setActiveIdx] = useState(null);
+  const [qIdx, setQIdx] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [answered, setAnswered] = useState(false);
+
+  // combat
+  const [runCorrect, setRunCorrect] = useState(0);
+  const [runXP, setRunXP] = useState(0);
+  const [lives, setLives] = useState(3);
+  const [bossHP, setBossHP] = useState(100);
+  const [combo, setCombo] = useState(0);
+  const [comboMax, setComboMax] = useState(0);
+  const [bossState, setBossState] = useState("idle"); // idle | hit | angry | defeated
+  const [dead, setDead] = useState(false);
+  const [floaters, setFloaters] = useState([]);
+  const [shake, setShake] = useState(false);
+  const [flash, setFlash] = useState(null); // green | red
+  const [adaLine, setAdaLine] = useState("");
+  const [adaMood, setAdaMood] = useState("idle");
+
+  // défis pratiques
+  const [codeInput, setCodeInput] = useState("");
+  const [testResults, setTestResults] = useState([]);
+  const [codeAttempts, setCodeAttempts] = useState(0);
+  const [orderWork, setOrderWork] = useState([]);
+
+  const [lastRun, setLastRun] = useState(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [aiSettings, setAiSettings] = useState(() => {
+    if (typeof window === "undefined") return AI_DEFAULT;
+    try {
+      const raw = window.localStorage.getItem(AI_SETTINGS_KEY);
+      return raw ? { ...AI_DEFAULT, ...JSON.parse(raw) } : AI_DEFAULT;
+    } catch {
+      return AI_DEFAULT;
+    }
+  });
+  const [aiStatus, setAiStatus] = useState("En attente d'un serveur local.");
+  const [aiReady, setAiReady] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiHint, setAiHint] = useState("");
+  const [aiError, setAiError] = useState("");
+
+  // Daily Seeded Challenge
+  const [dailySeed, setDailySeed] = useState(getTodaysSeed());
+  const [dailyRun, setDailyRun] = useState(null);
+  const [dailyQIdx, setDailyQIdx] = useState(0);
+  const [dailyScore, setDailyScore] = useState(0);
+
+  // SRS Spaced Repetition
+  const [srsSessionItems, setSrsSessionItems] = useState([]);
+  const [srsSessionIdx, setSrsSessionIdx] = useState(0);
+
+  const floatId = useRef(0);
+
+  SFX.on = soundOn;
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(STORAGE_KEY);
+        setProfile(res ? { ...FRESH, ...JSON.parse(res.value) } : { ...FRESH });
+      } catch {
+        setProfile({ ...FRESH });
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || document.getElementById("fsq-styles")) return;
+    const el = document.createElement("style");
+    el.id = "fsq-styles";
+    el.textContent = FSQ_CSS;
+    document.head.appendChild(el);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(aiSettings));
+    } catch {
+      /* ignore */
+    }
+  }, [aiSettings]);
+
+  // Initialise l'état d'un défi pratique quand on arrive dessus
+  useEffect(() => {
+    if (view !== "battle" || activeIdx == null) return;
+    const q = MODULES[activeIdx]?.questions[qIdx];
+    if (!q) return;
+    if (q.type === "code") { setCodeInput(q.starter || ""); setTestResults([]); setCodeAttempts(0); }
+    else if (q.type === "order") { setOrderWork(shuffleIndices(q.lines.length)); }
+  }, [view, activeIdx, qIdx]);
+
+  async function persist(next) {
+    setProfile(next);
+    try {
+      await window.storage.set(STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* la progression reste en mémoire pour cette session même si la sauvegarde échoue */
+    }
+  }
+
+  if (!profile) return <LoadingScreen />;
+
+  function isUnlocked(idx) {
+    if (idx === 0) return true;
+    return !!profile.results[MODULES[idx - 1].id]?.passed;
+  }
+
+  function setAda(line, mood) { setAdaLine(line); setAdaMood(mood); }
+
+  function addFloater(kind, text) {
+    const id = ++floatId.current;
+    const x = 16 + Math.random() * 58;
+    setFloaters((f) => [...f, { id, kind, text, x }]);
+    window.setTimeout(() => setFloaters((f) => f.filter((it) => it.id !== id)), 880);
+  }
+
+  function startModule(idx) {
+    setActiveIdx(idx);
+    setQIdx(0);
+    setSelected(null);
+    setAnswered(false);
+    setRunCorrect(0);
+    setRunXP(0);
+    setLives(3);
+    setBossHP(100);
+    setCombo(0);
+    setComboMax(0);
+    setBossState("idle");
+    setDead(false);
+    setFloaters([]);
+    setShake(false);
+    setFlash(null);
+    setAda("", "idle");
+    setView("intro");
+  }
+
+  function startDailyChallenge() {
+    const todayRef = getDailyReference();
+    if (profile.dailyRuns?.[todayRef]) {
+      setAda("Tu as déjà relevé le défi d'aujourd'hui! Reviens demain.", "idle");
+      return;
+    }
+    const run = generateDailyRun(dailySeed, MODULES);
+    setDailyRun(run);
+    setDailyQIdx(0);
+    setDailyScore(0);
+    setView("daily");
+  }
+
+  function startSrsSession() {
+    const allQ = collectAllQuestions(MODULES);
+    const due = getDueItems(profile.srsState || {});
+    if (due.length === 0) {
+      // Initialize SRS for all questions if none exist
+      if (Object.keys(profile.srsState || {}).length === 0) {
+        const newSrsState = {};
+        allQ.forEach((q, idx) => {
+          newSrsState[`q-${idx}`] = initSrsItem();
+        });
+        persist({ ...profile, srsState: newSrsState });
+        const initDue = getDueItems(newSrsState);
+        setSrsSessionItems(initDue.slice(0, 10)); // Max 10 per session
+        setSrsSessionIdx(0);
+        setView("srs");
+      } else {
+        setAda("Aucune révision à faire pour l'instant. Tu progresses bien!", "proud");
+      }
+      return;
+    }
+    setSrsSessionItems(due.slice(0, 20)); // Max 20 due items per session
+    setSrsSessionIdx(0);
+    setView("srs");
+  }
+
+  function engage() {
+    setAda("À toi de jouer — vise juste, j'assure tes arrières.", "idle");
+    setView("battle");
+  }
+
+  // Coup réussi (QCM correct, tests au vert, ordre juste)
+  function landHit() {
+    const len = MODULES[activeIdx].questions.length;
+    const nc = combo + 1;
+    setCombo(nc);
+    setComboMax((m) => Math.max(m, nc));
+    setRunCorrect((c) => c + 1);
+    setBossHP((h) => Math.max(0, h - 100 / len));
+    const mult = 1 + (nc - 1) * 0.5;
+    const dmg = Math.round((100 / len) * mult);
+    addFloater("dmg", `${nc >= 3 ? "CRIT " : ""}-${dmg}`);
+    setRunXP((x) => x + 10 + nc * 5);
+    setBossState("hit"); window.setTimeout(() => setBossState("idle"), 420);
+    setFlash("green"); window.setTimeout(() => setFlash(null), 200);
+    setAda(nc >= 3 ? pick(ADA_LINES.combo) : pick(ADA_LINES.correct), nc >= 3 ? "proud" : "happy");
+    SFX.correct(nc);
+  }
+
+  // Riposte du boss (QCM faux, ordre faux)
+  function hurt() {
+    setCombo(0);
+    const nl = Math.max(0, lives - 1);
+    setLives(nl);
+    setBossState("angry"); window.setTimeout(() => setBossState("idle"), 520);
+    setShake(true); window.setTimeout(() => setShake(false), 420);
+    setFlash("red"); window.setTimeout(() => setFlash(null), 260);
+    addFloater("hurt", "−1 ♥");
+    setAda(nl <= 0 ? "Notre connexion lâche…" : nl === 1 ? pick(ADA_LINES.low) : pick(ADA_LINES.wrong), "worried");
+    SFX.wrong();
+    if (nl <= 0) setDead(true);
+  }
+
+  function selectAnswer(i) {
+    if (answered) return;
+    const q = MODULES[activeIdx].questions[qIdx];
+    setSelected(i);
+    setAnswered(true);
+    if (i === q.correct) landHit(); else hurt();
+  }
+
+  // Défi CODE : exécute les tests ; tout au vert = coup porté (itération libre, pas de perte de cœur)
+  function runTests() {
+    if (answered) return;
+    const q = MODULES[activeIdx].questions[qIdx];
+    const res = runCode(codeInput, q.tests);
+    setTestResults(res);
+    const allPass = res.length > 0 && res.every((r) => r.pass);
+    if (allPass) {
+      const firstTry = codeAttempts === 0;
+      setSelected("code");
+      setAnswered(true);
+      landHit();
+      if (firstTry) { setRunXP((x) => x + 20); addFloater("dmg", "PROPRE +20"); }
+    } else {
+      setCodeAttempts((a) => a + 1);
+      setAda("Presque — un test reste rouge. Ajuste ton code et relance.", "worried");
+      SFX.hit();
+    }
+  }
+
+  // Défi ORDRE : validation unique comme un QCM
+  function moveLine(p, dir) {
+    if (answered) return;
+    setOrderWork((w) => {
+      const a = [...w];
+      const np = p + dir;
+      if (np < 0 || np >= a.length) return a;
+      [a[p], a[np]] = [a[np], a[p]];
+      return a;
+    });
+  }
+  function validateOrder() {
+    if (answered) return;
+    setSelected("order");
+    setAnswered(true);
+    if (orderWork.every((v, idx) => v === idx)) landHit(); else hurt();
+  }
+
+  function nextQuestion() {
+    if (dead) { finishBattle(false); return; }
+    const mod = MODULES[activeIdx];
+    if (qIdx + 1 < mod.questions.length) {
+      setQIdx((q) => q + 1);
+      setSelected(null);
+      setAnswered(false);
+    } else {
+      finishBattle(true);
+    }
+  }
+
+  function finishBattle(survived) {
+    const mod = MODULES[activeIdx];
+    const len = mod.questions.length;
+    const pct = Math.round((runCorrect / len) * 100);
+    const passed = survived;
+    const flawless = passed && lives === 3;
+    const perfect = passed && pct === 100;
+
+    const earned = new Set(profile.badges || []);
+    const newly = [];
+    const add = (id) => { if (!earned.has(id)) { earned.add(id); newly.push(id); } };
+    if (passed) {
+      add("first_blood");
+      if (flawless) add("flawless");
+      if (comboMax >= 6) add("combo_master");
+      if (perfect) add("perfectionist");
+      if (mod.id === "boss") add("guardian");
+    }
+
+    const prev = profile.results[mod.id] || {};
+    const results = {
+      ...profile.results,
+      [mod.id]: {
+        bestScore: Math.max(prev.bestScore || 0, pct),
+        passed: passed || prev.passed || false,
+        flawless: flawless || prev.flawless || false,
+      },
+    };
+    const completedNow = MODULES.filter((m) => results[m.id]?.passed).length;
+    if (passed && completedNow >= Math.ceil(MODULES.length / 2)) add("half_way");
+
+    const lore = [...(profile.lore || [])];
+    let loreUnlocked = null;
+    if (passed && !lore.includes(mod.id)) { lore.push(mod.id); loreUnlocked = mod.lore; }
+
+    const xpGain = passed ? runXP + (flawless ? 50 : 0) + (perfect ? 50 : 0) : Math.round(runXP * 0.5);
+    const oldLabel = getLevelInfo(profile.xp).label;
+    const newXP = profile.xp + xpGain;
+    const leveledTo = getLevelInfo(newXP).label !== oldLabel ? getLevelInfo(newXP).label : null;
+    const bestCombo = Math.max(profile.bestCombo || 0, comboMax);
+
+    persist({ xp: newXP, results, badges: [...earned], lore, bestCombo });
+
+    setLastRun({ passed, pct, xpGain, comboMax, livesLeft: lives, flawless, perfect, newBadges: newly, loreUnlocked, leveledTo });
+    if (passed) { SFX.victory(); if (leveledTo) window.setTimeout(() => SFX.levelup(), 550); }
+    else SFX.defeat();
+    setBossState(passed ? "defeated" : "idle");
+    setView("result");
+  }
+
+  function backToMap() {
+    setView("map");
+    setActiveIdx(null);
+  }
+
+  async function resetProgress() {
+    await persist({ ...FRESH });
+    setConfirmReset(false);
+    setView("map");
+  }
+
+  function exportProgress() {
+    const payload = JSON.stringify(profile, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "fullstack-quest-save.json";
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function importProgress() {
+    if (!importText.trim()) return;
+    try {
+      const parsed = JSON.parse(importText);
+      const next = {
+        ...FRESH,
+        ...(parsed && typeof parsed === "object" ? parsed : {}),
+      };
+      await persist(next);
+      setImportText("");
+      setView("map");
+    } catch {
+      setAda("Sauvegarde invalide. Vérifie le JSON et réessaie.", "worried");
+    }
+  }
+
+  function clearAiHint() {
+    setAiHint("");
+    setAiError("");
+  }
+
+  function buildLocalAIPrompt() {
+    const mod = MODULES[activeIdx];
+    const q = mod?.questions[qIdx];
+    if (!mod || !q) return "";
+    const kind = q.type || "qcm";
+    const parts = [
+      "Tu es un coach pédagogique ultra concis pour une app de révision.",
+      "Tu ne dois jamais donner la réponse brute ni copier-coller la solution complète.",
+      "Tu dois donner un indice utile en 1 à 3 phrases, orienté compréhension.",
+      `Module: ${mod.title}`,
+      `Type d'exercice: ${kind}`,
+      `Question: ${q.prompt}`,
+    ];
+    if (q.code) parts.push(`Code affiché: ${q.code}`);
+    if (q.options) parts.push(`Choix possibles: ${q.options.map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`).join(" | ")}`);
+    if (q.starter) parts.push(`Départ du code: ${q.starter}`);
+    if (q.lines) parts.push(`Lignes à ordonner: ${q.lines.join(" || ")}`);
+    parts.push("Réponds en français, ton direct, sans préambule, sans markdown lourd.");
+    return parts.join("\n");
+  }
+
+  async function askLocalHint() {
+    if (activeIdx == null) return;
+    const mod = MODULES[activeIdx];
+    const q = mod?.questions[qIdx];
+    if (!q) return;
+    setAiBusy(true);
+    setAiError("");
+    setAiHint("");
+
+    const endpoint = String(aiSettings.endpoint || "").replace(/\/$/, "");
+    const prompt = buildLocalAIPrompt();
+
+    try {
+      let text = "";
+      if (aiSettings.provider === "openai") {
+        const res = await fetch(`${endpoint}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: aiSettings.model,
+            messages: [
+              { role: "system", content: "Tu es un coach de révision concis et prudent. Ne donne jamais la réponse brute." },
+              { role: "user", content: prompt },
+            ],
+            temperature: 0.2,
+            stream: false,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        text = data?.choices?.[0]?.message?.content || "";
+      } else {
+        const res = await fetch(`${endpoint}/api/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: aiSettings.model,
+            prompt,
+            stream: false,
+            options: { temperature: 0.2 },
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        text = data?.response || "";
+      }
+
+      const cleaned = String(text).trim();
+      if (!cleaned) throw new Error("Réponse vide");
+      setAiHint(cleaned);
+      setAiReady(true);
+      setAiStatus(`Connecté à ${aiSettings.provider} · ${aiSettings.model}`);
+    } catch (e) {
+      setAiReady(false);
+      setAiStatus("Serveur local non joignable.");
+      setAiError(`IA locale indisponible: ${String(e?.message || e)}. Lance ton serveur local puis réessaie.`);
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  const completedCount = MODULES.filter((m) => profile.results[m.id]?.passed).length;
+  const levelInfo = getLevelInfo(profile.xp);
+
+  const badgeCount = (profile.badges || []).length;
+  const nextIdx = MODULES.findIndex((m) => !profile.results[m.id]?.passed);
+  const adaGreet =
+    completedCount === 0
+      ? "Bienvenue, Sprite. Je suis ADA, la dernière Gardienne. La Stack est corrompue par les Bugs — ensemble, purifions-la secteur par secteur."
+      : completedCount === MODULES.length
+      ? "Tu as purifié toute la Stack. Tu n'es plus un simple Sprite : tu es un Gardien. Merci, pour nous tous."
+      : `Secteur ${completedCount}/${MODULES.length} purifié. ${MODULES[nextIdx]?.boss.name ?? "Un boss"} rôde dans le prochain duel…`;
+
+  // Tout ce dont les vues ont besoin, regroupé en un seul objet.
+  const ctx = {
+    profile,
+    activeIdx, qIdx, selected, answered,
+    lives, bossHP, combo, runXP, bossState, dead, floaters, shake, flash, adaLine, adaMood,
+    soundOn, setSoundOn, setView, confirmReset, setConfirmReset, codeInput, setCodeInput,
+    testResults, codeAttempts, orderWork, lastRun,
+    importText, setImportText, exportProgress, importProgress,
+    aiSettings, setAiSettings, aiReady, aiStatus,
+    aiHint, aiBusy, aiError, askLocalHint, clearAiHint,
+    levelInfo, completedCount, badgeCount, nextIdx, adaGreet,
+    isUnlocked, startModule, engage, backToMap, resetProgress,
+    selectAnswer, runTests, moveLine, validateOrder, nextQuestion,
+    dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, startDailyChallenge,
+    srsSessionItems, srsSessionIdx, setSrsSessionIdx, startSrsSession, persist,
+  };
+
+  /* ------------------------------ ROUTAGE ------------------------------ */
+  if (view === "codex") return <><CodexView ctx={ctx} /><InstallPrompt /></>;
+  if (view === "intro") return <><IntroView ctx={ctx} /><InstallPrompt /></>;
+  if (view === "battle") return <><BattleView ctx={ctx} /><InstallPrompt /></>;
+  if (view === "result") return <><ResultView ctx={ctx} /><InstallPrompt /></>;
+  if (view === "daily") return <><DailyView ctx={ctx} /><InstallPrompt /></>;
+  if (view === "srs") return <><SrsView ctx={ctx} /><InstallPrompt /></>;
+  return <><MapView ctx={ctx} /><InstallPrompt /></>;
+}
+
+
