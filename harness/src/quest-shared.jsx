@@ -80,6 +80,31 @@ export function runCode(userCode, tests) {
   });
 }
 
+// AI helper: calls configured AI server (Vite env `VITE_AI_SERVER_URL`), falls back to localhost.
+export async function aiGenerate(prompt, opts = {}) {
+  const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_AI_SERVER_URL)
+    ? import.meta.env.VITE_AI_SERVER_URL
+    : (typeof window !== 'undefined' ? window._VITE_AI_SERVER_URL : null) || 'http://localhost:8000';
+  const token = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_AI_API_TOKEN)
+    ? import.meta.env.VITE_AI_API_TOKEN
+    : '';
+  try {
+    const res = await fetch(`${base.replace(/\/$/, '')}/api/v1/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'X-API-Key': token } : {}),
+      },
+      body: JSON.stringify({ prompt, max_tokens: opts.max_tokens || 256 })
+    });
+    if (!res.ok) return { error: true, status: res.status, body: await res.text() };
+    const j = await res.json();
+    return { error: false, data: j };
+  } catch (e) {
+    return { error: true, message: String(e) };
+  }
+}
+
 export function shuffleIndices(n) {
   const a = Array.from({ length: n }, (_, i) => i);
   for (let tries = 0; tries < 12; tries++) {

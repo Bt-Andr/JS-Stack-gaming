@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import FullstackQuest from "../../fullstack-quest.jsx";
+import AiTest from "./ai-test.jsx";
 import "./index.css";
 
 // Shim de window.storage (l'artifact l'utilise) -> localStorage
@@ -14,7 +15,12 @@ window.storage = {
   },
 };
 
-ReactDOM.createRoot(document.getElementById("root")).render(<FullstackQuest />);
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <>
+    <FullstackQuest />
+    <AiTest />
+  </>
+);
 
 // Register service worker for PWA (best-effort, with cleanup)
 if (typeof navigator !== "undefined" && 'serviceWorker' in navigator) {
