@@ -23,7 +23,7 @@ import {
   Lock, Check, ChevronRight, ArrowLeft, RotateCcw, Skull,
   Volume2, VolumeX, BookOpen, MessageSquareText,
   Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle, Hammer,
-  GraduationCap, Wrench
+  GraduationCap, Wrench, RefreshCw, Cloud
 } from "lucide-react";
 import {
   BG, PANEL, PANEL_SOFT, LINE, TEXT, TEXT_MUTED, AMBER, SUCCESS, DANGER,
@@ -1233,7 +1233,10 @@ const AI_DEFAULT = {
   provider: "ollama",
   endpoint: "http://localhost:11434",
   model: "llama3.2",
+  apiKey: "",
 };
+const SYNC_SETTINGS_KEY = "fullstack-quest-sync-settings";
+const SYNC_DEFAULT = { serverUrl: "", account: "", pin: "" };
 /* ---------------------------------------------------------------------- */
 /*  COMPOSANT PRINCIPAL                                                    */
 /* ---------------------------------------------------------------------- */
@@ -1291,7 +1294,19 @@ async function callAi(prompt, aiSettings) {
   const endpoint = String(aiSettings.endpoint || "").replace(/\/$/, "");
   try {
     let text = "";
-    if (aiSettings.provider === "openai") {
+    if (aiSettings.provider === "fsq-server") {
+      const res = await fetch(`${endpoint}/api/v1/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(aiSettings.apiKey ? { "X-API-Key": aiSettings.apiKey } : {}),
+        },
+        body: JSON.stringify({ prompt, max_tokens: 300 }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      text = data?.answer || "";
+    } else if (aiSettings.provider === "openai") {
       const res = await fetch(`${endpoint}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1329,6 +1344,39 @@ async function callAi(prompt, aiSettings) {
   } catch (e) {
     return { ok: false, error: `IA locale indisponible: ${String(e?.message || e)}. Lance ton serveur local puis réessaie.` };
   }
+}
+
+/* Synchronisation multi-appareils : un blob JSON par compte, via les routes
+   /api/v1/profile/{compte} de ton ai-server (relais vers Upstash Redis).
+   Pas de vraie authentification : un nom de compte + PIN optionnel suffisent
+   pour un usage personnel/partagé, pas pour héberger des données sensibles. */
+function isSyncConfigured(syncSettings) {
+  return !!(syncSettings?.serverUrl && syncSettings?.account);
+}
+
+async function syncProfileGet(syncSettings) {
+  const base = String(syncSettings.serverUrl || "").replace(/\/$/, "");
+  const res = await fetch(`${base}/api/v1/profile/${encodeURIComponent(syncSettings.account)}`, {
+    headers: syncSettings.pin ? { "X-Profile-PIN": syncSettings.pin } : {},
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `HTTP ${res.status}`);
+  return body; // { profile, updatedISO }
+}
+
+async function syncProfilePut(syncSettings, profileObj) {
+  const base = String(syncSettings.serverUrl || "").replace(/\/$/, "");
+  const res = await fetch(`${base}/api/v1/profile/${encodeURIComponent(syncSettings.account)}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...(syncSettings.pin ? { "X-Profile-PIN": syncSettings.pin } : {}),
+    },
+    body: JSON.stringify({ profile: profileObj, pin: syncSettings.pin || undefined }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `HTTP ${res.status}`);
+  return body;
 }
 
 /* ====================================================================== */
@@ -1911,6 +1959,7 @@ function MapView({ ctx }) {
     importText, setImportText, exportProgress, importProgress,
     aiSettings, setAiSettings, aiReady, aiStatus,
     startDailyChallenge, startSrsSession, startQualificationExam, startTechnicalTrial,
+    syncSettings, setSyncSettings, syncStatus, syncBusy, syncNow,
   } = ctx;
   const qualified = !!profile.qualification?.passed;
   const chantierUnlocked = qualified && completedCount >= Math.ceil(MODULES.length / 2);
@@ -2157,9 +2206,9 @@ function MapView({ ctx }) {
               <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>COACH IA LOCAL</p>
             </div>
             <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
-              Branché sur un serveur local. Compatible avec Ollama ou un serveur OpenAI-compatible en local.
+              Branché sur un serveur local (Ollama), un serveur OpenAI-compatible, ou ton propre ai-server FSQ déployé (Render).
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
                 Moteur
                 <select
@@ -2170,6 +2219,7 @@ function MapView({ ctx }) {
                 >
                   <option value="ollama">Ollama</option>
                   <option value="openai">OpenAI-compatible</option>
+                  <option value="fsq-server">Serveur FSQ (ai-server / Render)</option>
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
@@ -2177,6 +2227,7 @@ function MapView({ ctx }) {
                 <input
                   value={aiSettings.endpoint}
                   onChange={(e) => setAiSettings((s) => ({ ...s, endpoint: e.target.value }))}
+                  placeholder={aiSettings.provider === "fsq-server" ? "https://mon-ai-service.onrender.com" : undefined}
                   className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
                   style={{ border: `1px solid ${LINE}`, color: TEXT }}
                 />
@@ -2190,9 +2241,77 @@ function MapView({ ctx }) {
                   style={{ border: `1px solid ${LINE}`, color: TEXT }}
                 />
               </label>
+              {aiSettings.provider === "fsq-server" && (
+                <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                  Clé API (si AI_API_KEY est définie côté serveur)
+                  <input
+                    type="password"
+                    value={aiSettings.apiKey || ""}
+                    onChange={(e) => setAiSettings((s) => ({ ...s, apiKey: e.target.value }))}
+                    className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                    style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                  />
+                </label>
+              )}
             </div>
             <div className="mt-2 text-[11px] font-mono" style={{ color: aiReady ? SUCCESS : TEXT_MUTED }}>
               {aiStatus}
+            </div>
+          </div>
+        </Frame>
+
+        <Frame accent="#8ECAE6" className="mt-4 p-4">
+          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <Cloud size={14} style={{ color: "#8ECAE6" }} />
+              <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>SYNCHRO MULTI-APPAREILS</p>
+            </div>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
+              Fais suivre ta progression entre appareils via ton ai-server déployé (Render). Un simple nom de
+              compte + PIN optionnel — pas un vrai système d'authentification, à réserver à un usage perso/partagé.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                Serveur (ai-server)
+                <input
+                  value={syncSettings.serverUrl}
+                  onChange={(e) => setSyncSettings((s) => ({ ...s, serverUrl: e.target.value }))}
+                  placeholder="https://mon-ai-service.onrender.com"
+                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                Compte
+                <input
+                  value={syncSettings.account}
+                  onChange={(e) => setSyncSettings((s) => ({ ...s, account: e.target.value }))}
+                  placeholder="ex: alice"
+                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                PIN (optionnel)
+                <input
+                  type="password"
+                  value={syncSettings.pin}
+                  onChange={(e) => setSyncSettings((s) => ({ ...s, pin: e.target.value }))}
+                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                />
+              </label>
+            </div>
+            <button
+              onClick={syncNow}
+              disabled={syncBusy}
+              className="mt-3 px-3 py-1.5 rounded-lg font-mono text-xs flex items-center gap-1.5 disabled:opacity-50"
+              style={{ border: `1px solid ${LINE}`, color: TEXT }}
+            >
+              <RefreshCw size={12} className={syncBusy ? "animate-spin" : ""} /> {syncBusy ? "Synchro…" : "Synchroniser maintenant"}
+            </button>
+            <div className="mt-2 text-[11px] font-mono" style={{ color: TEXT_MUTED }}>
+              {syncStatus}
             </div>
           </div>
         </Frame>
@@ -2632,6 +2751,18 @@ export default function FullstackQuest() {
   const [aiHint, setAiHint] = useState("");
   const [aiError, setAiError] = useState("");
 
+  const [syncSettings, setSyncSettings] = useState(() => {
+    if (typeof window === "undefined") return SYNC_DEFAULT;
+    try {
+      const raw = window.localStorage.getItem(SYNC_SETTINGS_KEY);
+      return raw ? { ...SYNC_DEFAULT, ...JSON.parse(raw) } : SYNC_DEFAULT;
+    } catch {
+      return SYNC_DEFAULT;
+    }
+  });
+  const [syncStatus, setSyncStatus] = useState("Synchro non configurée.");
+  const [syncBusy, setSyncBusy] = useState(false);
+
   // Daily Seeded Challenge
   const [dailySeed, setDailySeed] = useState(getTodaysSeed());
   const [dailyRun, setDailyRun] = useState(null);
@@ -2657,12 +2788,31 @@ export default function FullstackQuest() {
 
   useEffect(() => {
     (async () => {
+      let local = null;
       try {
         const res = await window.storage.get(STORAGE_KEY);
-        setProfile(res ? { ...FRESH, ...JSON.parse(res.value) } : { ...FRESH });
+        local = res ? { ...FRESH, ...JSON.parse(res.value) } : null;
       } catch {
-        setProfile({ ...FRESH });
+        local = null;
       }
+
+      if (isSyncConfigured(syncSettings)) {
+        setSyncStatus("Synchronisation…");
+        try {
+          const remote = await syncProfileGet(syncSettings);
+          const localTime = local?.updatedISO ? new Date(local.updatedISO).getTime() : 0;
+          const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
+          if (remote?.profile && remoteTime > localTime) {
+            local = { ...FRESH, ...remote.profile };
+            try { await window.storage.set(STORAGE_KEY, JSON.stringify(local)); } catch { /* le cache local est best-effort */ }
+          }
+          setSyncStatus(`Synchronisé · compte "${syncSettings.account}"`);
+        } catch (e) {
+          setSyncStatus(`Sync indisponible: ${String(e?.message || e)}`);
+        }
+      }
+
+      setProfile(local || { ...FRESH });
     })();
   }, []);
 
@@ -2683,6 +2833,15 @@ export default function FullstackQuest() {
     }
   }, [aiSettings]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify(syncSettings));
+    } catch {
+      /* ignore */
+    }
+  }, [syncSettings]);
+
   // Initialise l'état d'un défi pratique quand on arrive dessus
   useEffect(() => {
     if (view !== "battle" || activeIdx == null) return;
@@ -2693,11 +2852,41 @@ export default function FullstackQuest() {
   }, [view, activeIdx, qIdx]);
 
   async function persist(next) {
-    setProfile(next);
+    const stamped = { ...next, updatedISO: new Date().toISOString() };
+    setProfile(stamped);
     try {
-      await window.storage.set(STORAGE_KEY, JSON.stringify(next));
+      await window.storage.set(STORAGE_KEY, JSON.stringify(stamped));
     } catch {
       /* la progression reste en mémoire pour cette session même si la sauvegarde échoue */
+    }
+    if (isSyncConfigured(syncSettings)) {
+      syncProfilePut(syncSettings, stamped)
+        .then(() => setSyncStatus(`Synchronisé · compte "${syncSettings.account}"`))
+        .catch((e) => setSyncStatus(`Échec de synchro: ${String(e?.message || e)}`));
+    }
+  }
+
+  async function syncNow() {
+    if (!isSyncConfigured(syncSettings)) {
+      setSyncStatus("Configure un serveur et un compte d'abord.");
+      return;
+    }
+    setSyncBusy(true);
+    try {
+      const remote = await syncProfileGet(syncSettings);
+      const localTime = profile?.updatedISO ? new Date(profile.updatedISO).getTime() : 0;
+      const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
+      if (remote?.profile && remoteTime > localTime) {
+        await persist({ ...FRESH, ...remote.profile });
+        setSyncStatus(`Version distante plus récente adoptée · compte "${syncSettings.account}"`);
+      } else {
+        await syncProfilePut(syncSettings, profile);
+        setSyncStatus(`Poussé vers le serveur · compte "${syncSettings.account}"`);
+      }
+    } catch (e) {
+      setSyncStatus(`Échec de synchro: ${String(e?.message || e)}`);
+    } finally {
+      setSyncBusy(false);
     }
   }
 
@@ -3132,6 +3321,7 @@ export default function FullstackQuest() {
     toggleMilestone,
     qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, startQualificationExam, finishQualificationExam,
     techCodeInput, setTechCodeInput, techResults, startTechnicalTrial, runTechnicalTests,
+    syncSettings, setSyncSettings, syncStatus, syncBusy, syncNow,
   };
 
   /* ------------------------------ ROUTAGE ------------------------------ */

@@ -8,6 +8,10 @@ services:
     environment:
       - AI_PROVIDER=stub
       - AI_MODEL=fsq-stub
+      # Profile sync (optional, needed only for cross-device progress sync):
+      # get these from an Upstash Redis database (free tier) at upstash.com.
+      - UPSTASH_REDIS_REST_URL=${UPSTASH_REDIS_REST_URL:-}
+      - UPSTASH_REDIS_REST_TOKEN=${UPSTASH_REDIS_REST_TOKEN:-}
 
   ai-server-ollama:
     image: ollama/ollama:latest

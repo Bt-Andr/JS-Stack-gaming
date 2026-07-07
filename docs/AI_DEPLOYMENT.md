@@ -38,6 +38,25 @@ anyone who finds the URL can call it, and if you're forwarding to a paid
 
 The server logs a warning at startup if either is left at its permissive default.
 
+Cross-device profile sync (optional)
+-------------------------------------
+The same `ai-server` can also sync a player's progress across devices, via
+`GET/PUT /api/v1/profile/{account}`. No database to manage — it's a thin proxy
+to a free Upstash Redis instance, storing one JSON blob per account.
+
+1. Create a free database at https://upstash.com (Redis, REST API).
+2. Copy its **REST URL** and **REST token** from the Upstash console.
+3. Set them as env vars on Render: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`.
+4. In the app's "Synchro multi-appareils" panel, set the same account name (and
+   optional PIN) on every device you want to share progress across.
+
+This is intentionally lightweight, not real authentication: an account is just
+a name (3-32 chars) plus an optional PIN checked on read/write. Anyone who
+knows the account name (and PIN, if set) can read/write that profile. Fine for
+personal use or sharing with friends/family; don't use it for sensitive data.
+If the env vars are left empty, the profile routes return `503` and the app
+falls back to `localStorage` only (still works, just doesn't sync).
+
 Vercel configuration
 ---------------------
 After your AI service is deployed on Render (or another provider), configure the frontend deployed on Vercel to call it:
