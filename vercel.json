@@ -1,5 +1,5 @@
 {
-  "installCommand": "npm --prefix harness ci",
+  "installCommand": "npm --prefix harness ci && ln -sfn harness/node_modules node_modules",
   "buildCommand": "npm --prefix harness run build",
   "outputDirectory": "harness/dist"
 }
