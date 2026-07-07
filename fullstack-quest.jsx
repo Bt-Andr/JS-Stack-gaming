@@ -22,7 +22,8 @@ import {
   Braces, Sparkles, Hourglass, ShieldCheck, Atom, Triangle, Server, Zap, Crown,
   Lock, Check, ChevronRight, ArrowLeft, RotateCcw, Skull,
   Volume2, VolumeX, BookOpen, MessageSquareText,
-  Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle
+  Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle, Hammer,
+  GraduationCap, Wrench
 } from "lucide-react";
 import {
   BG, PANEL, PANEL_SOFT, LINE, TEXT, TEXT_MUTED, AMBER, SUCCESS, DANGER,
@@ -112,6 +113,7 @@ const MODULES = [
       },
       {
         type: "code",
+        technical: true,
         prompt: "Écris une fonction somme(a, b) qui renvoie la somme de deux nombres.",
         starter: "function somme(a, b) {\n  // ton code ici\n}",
         tests: [
@@ -217,6 +219,7 @@ const MODULES = [
       },
       {
         type: "code",
+        technical: true,
         prompt: "Écris une fonction pairs(arr) qui renvoie un NOUVEAU tableau avec uniquement les nombres pairs.",
         starter: "function pairs(arr) {\n  // indice : utilise .filter\n}",
         tests: [
@@ -338,6 +341,18 @@ const MODULES = [
           "return data;"
         ],
         explain: "On attend d'abord la réponse réseau (await fetch), PUIS on parse le corps en JSON (res.json() renvoie elle aussi une Promise, d'où le second await), et enfin on renvoie les données."
+      },
+      {
+        type: "code",
+        technical: true,
+        prompt: "Ce code a un bug : doubleAsync(nums) doit renvoyer une Promise résolue avec les nombres doublés, mais elle renvoie un tableau de Promises non résolues. Corrige-la avec Promise.all.",
+        starter: "async function doubleAsync(nums) {\n  // bug : on renvoie les promesses sans les attendre\n  return nums.map(n => Promise.resolve(n * 2));\n}",
+        tests: [
+          { call: "doubleAsync([1, 2, 3])", expect: [2, 4, 6] },
+          { call: "doubleAsync([])", expect: [] },
+          { call: "doubleAsync([5])", expect: [10] }
+        ],
+        explain: "nums.map(n => Promise.resolve(n * 2)) renvoie un tableau de Promises, pas les valeurs elles-mêmes. Promise.all(...) attend que toutes les promesses soient résolues avant de renvoyer le tableau final des résultats."
       }
     ]
   },
@@ -441,6 +456,7 @@ const MODULES = [
       },
       {
         type: "code",
+        technical: true,
         prompt: "Écris une fonction dernier(arr) qui renvoie le dernier élément d'un tableau (ou undefined s'il est vide).",
         starter: "function dernier(arr) {\n  // ton code ici\n}",
         tests: [
@@ -564,6 +580,18 @@ const MODULES = [
           "}"
         ],
         explain: "Un composant est une fonction : on déclare d'abord l'état avec useState (au sommet, jamais dans une condition), puis on retourne le JSX qui l'utilise, et on ferme la fonction."
+      },
+      {
+        type: "code",
+        technical: true,
+        prompt: "Ce reducer de compteur a un bug : \"reset\" ne remet pas le compteur à zéro. Corrige counterReducer(state, action).",
+        starter: "function counterReducer(state, action) {\n  switch (action.type) {\n    case \"increment\": return { count: state.count + 1 };\n    case \"decrement\": return { count: state.count - 1 };\n    case \"reset\": return state; // bug ici\n    default: return state;\n  }\n}",
+        tests: [
+          { call: "counterReducer({ count: 5 }, { type: 'increment' })", expect: { count: 6 } },
+          { call: "counterReducer({ count: 5 }, { type: 'decrement' })", expect: { count: 4 } },
+          { call: "counterReducer({ count: 5 }, { type: 'reset' })", expect: { count: 0 } }
+        ],
+        explain: "Le cas \"reset\" renvoyait state tel quel au lieu de produire un nouvel état à zéro. Un reducer doit toujours renvoyer un nouvel objet représentant l'état suivant : { count: 0 }, jamais muter ou ignorer l'état reçu."
       }
     ]
   },
@@ -677,6 +705,18 @@ const MODULES = [
           "}"
         ],
         explain: "Une route handler exporte une fonction nommée selon la méthode HTTP (GET). On construit la donnée, puis on renvoie une Response — ici Response.json() sérialise l'objet automatiquement."
+      },
+      {
+        type: "code",
+        technical: true,
+        prompt: "Corrige buildStaticParams(slugs) : pour generateStaticParams (App Router), elle doit renvoyer un tableau d'objets { params: { slug } }, un par slug — pas les slugs bruts.",
+        starter: "function buildStaticParams(slugs) {\n  // bug : renvoie les slugs bruts au lieu du format attendu\n  return slugs;\n}",
+        tests: [
+          { call: "buildStaticParams(['a', 'b'])", expect: [{ params: { slug: "a" } }, { params: { slug: "b" } }] },
+          { call: "buildStaticParams([])", expect: [] },
+          { call: "buildStaticParams(['only'])", expect: [{ params: { slug: "only" } }] }
+        ],
+        explain: "generateStaticParams attend un tableau d'objets au format { params: { ... } }. slugs.map(slug => ({ params: { slug } })) transforme chaque slug brut dans la forme exacte attendue par Next.js pour générer les pages statiques."
       }
     ]
   },
@@ -781,6 +821,18 @@ const MODULES = [
           "app.listen(3000);"
         ],
         explain: "On crée l'app, on branche les middlewares (express.json) AVANT les routes pour qu'elles en profitent, puis on déclare les routes, et enfin on écoute un port avec listen()."
+      },
+      {
+        type: "code",
+        technical: true,
+        prompt: "Corrige statusCategory(code) : elle classe un code HTTP par famille, mais confond actuellement les erreurs client (4xx) et serveur (5xx).",
+        starter: "function statusCategory(code) {\n  if (code >= 200 && code < 300) return \"success\";\n  if (code >= 400 && code < 600) return \"client-error\"; // bug ici\n  return \"other\";\n}",
+        tests: [
+          { call: "statusCategory(200)", expect: "success" },
+          { call: "statusCategory(404)", expect: "client-error" },
+          { call: "statusCategory(500)", expect: "server-error" }
+        ],
+        explain: "Il faut distinguer deux plages : 400-499 sont des erreurs côté client (client-error, ex : 404), 500-599 des erreurs côté serveur (server-error, ex : 500). Les confondre rend le diagnostic d'une panne bien plus difficile en production."
       }
     ]
   },
@@ -868,6 +920,18 @@ const MODULES = [
           "});"
         ],
         explain: "Les imports viennent toujours en premier (defineConfig puis le plugin), puis on exporte la configuration en lui passant le tableau de plugins. C'est le squelette de toute config Vite."
+      },
+      {
+        type: "code",
+        technical: true,
+        prompt: "Corrige resolveApiUrl(env) : elle doit lire env.VITE_API_URL, et se rabattre sur 'http://localhost:3000' dès que la variable est absente OU vide — pas seulement absente.",
+        starter: "function resolveApiUrl(env) {\n  // bug : une chaîne vide est traitée comme une URL valide\n  return env.VITE_API_URL !== undefined ? env.VITE_API_URL : 'http://localhost:3000';\n}",
+        tests: [
+          { call: "resolveApiUrl({ VITE_API_URL: 'https://api.exemple.com' })", expect: "https://api.exemple.com" },
+          { call: "resolveApiUrl({})", expect: "http://localhost:3000" },
+          { call: "resolveApiUrl({ VITE_API_URL: '' })", expect: "http://localhost:3000" }
+        ],
+        explain: "env.VITE_API_URL || 'http://localhost:3000' bascule sur la valeur par défaut dès que la variable est absente OU vide (chaîne falsy), contrairement à une simple vérification !== undefined qui laisse passer une chaîne vide comme si elle était valide."
       }
     ]
   },
@@ -956,6 +1020,7 @@ const MODULES = [
       },
       {
         type: "code",
+        technical: true,
         prompt: "Épreuve finale du Gardien. Écris slugify(titre) : tout en minuscules, les espaces remplacés par des tirets. \"Mon Article\" → \"mon-article\".",
         starter: "function slugify(titre) {\n  // ton code ici\n}",
         tests: [
@@ -969,7 +1034,200 @@ const MODULES = [
   }
 ];
 
-const TOTAL_QUESTIONS = MODULES.reduce((s, m) => s + m.questions.length, 0);
+/* ---------------------------------------------------------------------- */
+/*  CHANTIER — capstone : un vrai projet construit hors de l'app          */
+/* ---------------------------------------------------------------------- */
+const CHANTIER = {
+  id: "todo-fullstack-v1",
+  title: "Chantier — Gestionnaire de tâches Fullstack",
+  pitch: "Un vrai petit projet à construire toi-même, dans ton éditeur : une API Express qui stocke des tâches, et un front React qui les affiche et les modifie. FSQ ne peut pas lire ton dépôt — chaque jalon coché est une déclaration sur l'honneur, à toi de vérifier les critères avant de cocher.",
+  milestones: [
+    {
+      id: "setup",
+      moduleRef: "js-fond",
+      title: "Poser les fondations",
+      spec: "Crée un dossier de projet avec deux sous-dossiers : server/ (API) et client/ (front, généré avec Vite + React). Initialise un dépôt git avec un .gitignore (node_modules, .env).",
+      acceptance: [
+        "npm run dev fonctionne dans client/ sans erreur",
+        "Le serveur démarre sans erreur dans server/",
+        "git status ne montre aucun node_modules suivi",
+      ],
+      hint: "npm create vite@latest client -- --template react pour le front ; npm init -y && npm i express pour le serveur.",
+    },
+    {
+      id: "model",
+      moduleRef: "js-fond",
+      title: "Modéliser une tâche",
+      spec: "Dans server/, écris une fonction createTask(title) qui renvoie un objet { id, title, done: false, createdAt }. L'id doit être unique à chaque appel.",
+      acceptance: [
+        "Deux appels successifs à createTask produisent deux id différents",
+        "createTask('') est rejeté ou lève une erreur explicite, pas une tâche vide silencieuse",
+      ],
+      hint: "Date.now() ou crypto.randomUUID() suffisent largement pour un id unique ici.",
+    },
+    {
+      id: "api-list",
+      moduleRef: "express",
+      title: "Lister les tâches",
+      spec: "Crée la route GET /api/tasks qui renvoie la liste des tâches en JSON.",
+      acceptance: [
+        "curl localhost:PORT/api/tasks renvoie un tableau JSON avec un statut 200",
+        "La liste est vide ([]) au premier démarrage, pas une erreur",
+      ],
+      hint: "app.use(express.json()) doit être branché avant tes routes, même si celle-ci n'a pas de body.",
+    },
+    {
+      id: "api-create",
+      moduleRef: "express",
+      title: "Créer une tâche",
+      spec: "Crée la route POST /api/tasks qui prend { title } dans le body, crée la tâche et la renvoie.",
+      acceptance: [
+        "POST avec un title valide renvoie un statut 201 et la tâche créée",
+        "POST sans title (ou vide) renvoie un statut 400 avec un message clair, pas un crash serveur",
+      ],
+      hint: "Valide req.body.title avant d'appeler createTask — un serveur qui plante sur une entrée invalide est un bug, pas une fonctionnalité.",
+    },
+    {
+      id: "api-update-delete",
+      moduleRef: "express",
+      title: "Modifier et supprimer",
+      spec: "Ajoute PATCH /api/tasks/:id (bascule done) et DELETE /api/tasks/:id (supprime la tâche).",
+      acceptance: [
+        "PATCH sur un id existant bascule done et renvoie la tâche mise à jour",
+        "PATCH ou DELETE sur un id inconnu renvoie un statut 404, pas un crash ni un 200 silencieux",
+      ],
+      hint: "array.findIndex(t => t.id === req.params.id) : si -1, renvoie 404 immédiatement avant d'aller plus loin.",
+    },
+    {
+      id: "persist",
+      moduleRef: "async",
+      title: "Survivre à un redémarrage",
+      spec: "Les tâches ne doivent plus disparaître au redémarrage : sauvegarde-les dans un fichier JSON (fs.readFile/writeFile) à chaque modification, et recharge-les au démarrage.",
+      acceptance: [
+        "Créer une tâche, arrêter le serveur (Ctrl+C), le relancer : la tâche est toujours là",
+        "Le fichier JSON reste valide même après plusieurs écritures successives",
+      ],
+      hint: "Écris (et attends avec await) le fichier complet à chaque modification plutôt que de gérer un diff — plus simple, largement suffisant à cette échelle.",
+    },
+    {
+      id: "extract-logic",
+      moduleRef: "js-avance",
+      title: "Séparer la logique métier des routes",
+      spec: "Déplace createTask, la validation et la recherche par id dans un fichier tasks-service.js séparé, importé par tes routes Express. Les routes ne doivent plus contenir que de l'orchestration HTTP.",
+      acceptance: [
+        "Les fonctions de tasks-service.js n'importent rien d'Express (req/res)",
+        "Tu peux appeler ces fonctions dans un petit script à part, sans lancer le serveur, et elles fonctionnent",
+      ],
+      hint: "Un bon test : si tu dois inventer un req factice pour tester une fonction, elle n'est pas encore assez séparée d'Express.",
+    },
+    {
+      id: "front-list",
+      moduleRef: "react",
+      title: "Afficher la liste",
+      spec: "Dans client/, un composant TaskList récupère GET /api/tasks au montage (useEffect) et affiche : un état de chargement, un état d'erreur, puis la liste.",
+      acceptance: [
+        "Au premier rendu, un message de chargement est visible avant que les données arrivent",
+        "Arrêter le serveur et recharger la page affiche un message d'erreur clair, pas un écran blanc",
+      ],
+      hint: "Trois états suffisent : loading, error, data — un seul objet { status, data, error } fait très bien l'affaire.",
+    },
+    {
+      id: "front-create",
+      moduleRef: "react",
+      title: "Ajouter une tâche",
+      spec: "Ajoute un formulaire contrôlé (input + bouton) qui POST une nouvelle tâche puis met à jour la liste affichée sans recharger la page.",
+      acceptance: [
+        "Soumettre le formulaire vide ne déclenche pas d'appel réseau inutile",
+        "Après ajout, la nouvelle tâche apparaît dans la liste sans reload manuel du navigateur",
+      ],
+      hint: "Le plus simple : après un POST réussi, refais un fetch de la liste complète plutôt que de bricoler une fusion manuelle d'état.",
+    },
+    {
+      id: "front-update-delete",
+      moduleRef: "react",
+      title: "Cocher et supprimer",
+      spec: "Ajoute une case à cocher (PATCH) et un bouton supprimer (DELETE) par tâche, avec un indicateur de chargement propre à la ligne concernée.",
+      acceptance: [
+        "Cocher une tâche ne recharge pas visuellement les autres lignes",
+        "Un clic rapide sur supprimer ne peut pas déclencher deux DELETE pour la même tâche",
+      ],
+      hint: "Stocke l'id de la tâche \"en cours de traitement\" dans un state à part (ex : pendingId) pour cibler l'affichage et désactiver le bouton pendant l'appel.",
+    },
+    {
+      id: "error-resilience",
+      moduleRef: "async",
+      title: "Résister aux pannes réseau",
+      spec: "Si l'API est injoignable, l'interface doit afficher un message compréhensible et proposer de réessayer — jamais planter ni rester bloquée sur \"Chargement…\".",
+      acceptance: [
+        "Couper le serveur pendant que le front tourne : un message d'erreur exploitable apparaît, pas une exception non gérée",
+        "Un bouton \"réessayer\" relance la requête sans recharger toute la page",
+      ],
+      hint: "try/catch autour du fetch, avec un état error distinct de loading — jamais le même flag booléen pour les deux.",
+    },
+    {
+      id: "build-config",
+      moduleRef: "vite",
+      title: "Configurer les environnements",
+      spec: "Le front ne doit jamais avoir l'URL de l'API codée en dur. Utilise une variable d'environnement (VITE_API_URL), avec une valeur par défaut sensée en développement.",
+      acceptance: [
+        "npm run build (client) produit un bundle sans warning bloquant",
+        "Changer VITE_API_URL et relancer npm run dev change l'URL appelée, sans toucher au code",
+      ],
+      hint: "import.meta.env.VITE_API_URL — et un fichier .env.example committé, jamais le vrai .env.",
+    },
+    {
+      id: "typed-contract",
+      moduleRef: "ts",
+      title: "Fiabiliser le contrat de données (bonus)",
+      spec: "Documente (au minimum en JSDoc, ou en convertissant en TypeScript) la forme exacte d'une tâche partagée entre front et back : { id, title, done, createdAt }.",
+      acceptance: [
+        "La définition existe à un seul endroit, pas copiée-collée différemment côté front et back",
+        "Ajouter un champ à une tâche ne demande de modifier qu'un seul fichier pour que les deux côtés le sachent",
+      ],
+      hint: "Même sans vrai TypeScript, un fichier types.js avec un commentaire JSDoc @typedef documente déjà la forme attendue et évite les dérives silencieuses.",
+    },
+    {
+      id: "deploy",
+      moduleRef: "boss",
+      title: "Déployer pour de vrai",
+      spec: "Déploie server/ sur Render et client/ sur Vercel — exactement comme pour Fullstack Quest lui-même. Connecte les deux avec une variable d'environnement d'URL, pas une adresse en dur.",
+      acceptance: [
+        "L'URL Vercel publique affiche la liste de tâches réelle servie par Render, sans erreur CORS",
+        "Créer une tâche depuis le site déployé (pas localhost) fonctionne de bout en bout",
+      ],
+      hint: "Le piège classique : CORS. Le middleware cors côté Express doit explicitement autoriser l'origine Vercel.",
+    },
+  ],
+};
+
+/* ---------------------------------------------------------------------- */
+/*  QUALIFICATION — deux paliers d'accès aux épreuves plus techniques     */
+/* ---------------------------------------------------------------------- */
+// Tronc commun toujours accessible séquentiellement ; au-delà, chaque secteur
+// exige en plus d'avoir réussi l'Examen de Qualification (voir plus bas).
+const FOUNDATION_TIER = ["js-fond", "js-avance", "async"];
+const ADVANCED_TIER = ["ts", "react", "next", "express", "vite", "boss"];
+const QUALIFICATION_PASS_PCT = 80;
+const QUALIFICATION_SIZE = 10;
+// Score minimum sur un secteur pour débloquer son Épreuve Technique (l'exercice
+// code/débogage, retiré du combat normal et proposé à part une fois "qualifié").
+const TECHNICAL_UNLOCK_PCT = 70;
+
+function getBattleQuestions(mod) {
+  return mod.questions.filter((q) => !q.technical);
+}
+function getTechnicalQuestions(mod) {
+  return mod.questions.filter((q) => q.technical);
+}
+function isTechnicalUnlocked(profile, mod) {
+  const r = profile.results[mod.id];
+  return !!r?.passed && (r.bestScore || 0) >= TECHNICAL_UNLOCK_PCT;
+}
+function isTechnicalDone(profile, mod) {
+  return !!profile.technical?.[mod.id]?.passed;
+}
+
+const TOTAL_QUESTIONS = MODULES.reduce((s, m) => s + getBattleQuestions(m).length, 0);
 const AI_SETTINGS_KEY = "fullstack-quest-ai-settings";
 const AI_DEFAULT = {
   provider: "ollama",
@@ -985,9 +1243,12 @@ const FRESH = {
   badges: [],
   lore: [],
   bestCombo: 0,
-  meta: { version: 2, features: { daily: true, srs: true } },
+  meta: { version: 4, features: { daily: true, srs: true, chantier: true, qualification: true } },
   dailyRuns: {},
   srsState: {},
+  chantier: { milestones: {} },
+  qualification: { passed: false, bestScore: 0, attempts: 0 },
+  technical: {},
 };
 
 /* Daily Challenge & SRS Helpers */
@@ -1006,8 +1267,9 @@ function generateDailyRun(seed, modules) {
   const r = rng(seed);
   const picked = [];
   for (const mod of modules) {
-    const qIdx = Math.floor(r() * mod.questions.length);
-    const q = mod.questions[qIdx];
+    const pool = getBattleQuestions(mod);
+    const qIdx = Math.floor(r() * pool.length);
+    const q = pool[qIdx];
     picked.push({ ...q, moduleId: mod.id, moduleName: mod.title });
   }
   return picked;
@@ -1016,16 +1278,256 @@ function generateDailyRun(seed, modules) {
 function collectAllQuestions(modules) {
   const all = [];
   for (const mod of modules) {
-    for (const q of mod.questions) {
+    for (const q of getBattleQuestions(mod)) {
       all.push({ ...q, moduleId: mod.id });
     }
   }
   return all;
 }
 
+/* Appel générique à un serveur IA local (Ollama ou compatible OpenAI) — partagé
+   entre l'indice de question et l'indice de jalon de Chantier. */
+async function callAi(prompt, aiSettings) {
+  const endpoint = String(aiSettings.endpoint || "").replace(/\/$/, "");
+  try {
+    let text = "";
+    if (aiSettings.provider === "openai") {
+      const res = await fetch(`${endpoint}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: aiSettings.model,
+          messages: [
+            { role: "system", content: "Tu es un coach de révision concis et prudent. Ne donne jamais la réponse brute." },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.2,
+          stream: false,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      text = data?.choices?.[0]?.message?.content || "";
+    } else {
+      const res = await fetch(`${endpoint}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: aiSettings.model,
+          prompt,
+          stream: false,
+          options: { temperature: 0.2 },
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      text = data?.response || "";
+    }
+    const cleaned = String(text).trim();
+    if (!cleaned) throw new Error("Réponse vide");
+    return { ok: true, text: cleaned };
+  } catch (e) {
+    return { ok: false, error: `IA locale indisponible: ${String(e?.message || e)}. Lance ton serveur local puis réessaie.` };
+  }
+}
+
 /* ====================================================================== */
 /*  VUES — chaque écran est un composant pur piloté par `ctx`             */
 /* ====================================================================== */
+
+/* --- Examen de Qualification ------------------------------------------ */
+function QualificationView({ ctx }) {
+  const { qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, setView, finishQualificationExam } = ctx;
+  const [selected, setSelected] = useState(null);
+  const [answered, setAnswered] = useState(false);
+  const [result, setResult] = useState(null);
+
+  if (!qualRun || qualQIdx >= qualRun.length) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: BG, color: TEXT }}>
+        <div className="text-center px-4 max-w-sm">
+          <GraduationCap size={40} className="mx-auto mb-4" style={{ color: result?.passed ? SUCCESS : AMBER }} />
+          <h2 className="text-2xl sm:text-3xl font-mono font-bold mb-4">
+            {result?.passed ? "Qualification obtenue !" : "Examen terminé"}
+          </h2>
+          <div className="mb-6">
+            <Frame accent={result?.passed ? SUCCESS : AMBER} className="inline-block p-4">
+              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+                <p className="font-mono text-xs tracking-widest mb-2" style={{ color: TEXT_MUTED }}>SCORE</p>
+                <p className="text-xl font-bold" style={{ color: result?.passed ? SUCCESS : AMBER }}>{qualScore} / {qualRun?.length || 0} · {result?.pct ?? 0}%</p>
+                <p className="text-xs mt-2" style={{ color: TEXT_MUTED }}>Seuil requis : {QUALIFICATION_PASS_PCT}%</p>
+              </div>
+            </Frame>
+          </div>
+          {!result?.passed && (
+            <p className="text-xs mb-4 font-mono leading-relaxed" style={{ color: TEXT_MUTED }}>
+              Retente quand tu veux — révise les secteurs fondamentaux (JS, JS Avancé, Async) puis reviens.
+            </p>
+          )}
+          <button onClick={() => setView("map")} className="px-4 py-2 rounded-lg font-mono" style={{ backgroundColor: AMBER, color: BG }}>
+            Retour à la Carte
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const q = qualRun[qualQIdx];
+  function handleAnswer() {
+    if (selected === null) return;
+    if (selected === q.correct) { setQualScore((s) => s + 1); SFX.correct(1); } else { SFX.wrong(); }
+    setAnswered(true);
+  }
+  function handleNext() {
+    const isLast = qualQIdx + 1 >= qualRun.length;
+    if (isLast) setResult(finishQualificationExam());
+    setQualQIdx((i) => i + 1);
+    setSelected(null);
+    setAnswered(false);
+  }
+
+  return (
+    <div className="min-h-screen p-4" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-xl mx-auto">
+        <div className="mb-6 flex justify-between items-center">
+          <h3 className="font-mono text-sm font-bold flex items-center gap-1.5" style={{ color: AMBER }}>
+            <GraduationCap size={16} /> EXAMEN DE QUALIFICATION
+          </h3>
+          <span className="font-mono text-xs" style={{ color: TEXT_MUTED }}>{qualQIdx + 1} / {qualRun.length}</span>
+        </div>
+        <div className="mb-4">
+          <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: LINE }}>
+            <div className="h-full rounded-full" style={{ width: `${((qualQIdx + 1) / qualRun.length) * 100}%`, backgroundColor: AMBER, transition: "width 300ms ease" }} />
+          </div>
+        </div>
+        <Frame accent={AMBER} className="p-4">
+          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+            <h4 className="font-mono font-bold mb-4">{q.prompt}</h4>
+            <div className="space-y-2">
+              {q.options?.map((opt, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => !answered && setSelected(idx)}
+                  className="w-full p-3 rounded-lg text-left transition-colors"
+                  style={{
+                    backgroundColor: selected === idx ? `${q.correct === idx ? SUCCESS : DANGER}22` : PANEL_SOFT,
+                    border: `1px solid ${selected === idx ? (q.correct === idx ? SUCCESS : DANGER) : LINE}`,
+                    color: TEXT,
+                  }}
+                  disabled={answered}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+            {!answered ? (
+              <button onClick={handleAnswer} disabled={selected === null} className="w-full mt-4 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: selected === null ? LINE : AMBER, color: selected === null ? TEXT_MUTED : BG }}>
+                Valider
+              </button>
+            ) : (
+              <>
+                {selected === q.correct ? (
+                  <p className="text-sm mt-3 font-mono" style={{ color: SUCCESS }}>✓ Correct!</p>
+                ) : (
+                  <>
+                    <p className="text-sm mt-3 font-mono" style={{ color: DANGER }}>✗ Incorrect</p>
+                    <p className="text-xs mt-1 font-mono" style={{ color: TEXT_MUTED }}>Réponse: {q.options[q.correct]}</p>
+                  </>
+                )}
+                {q.explain && <p className="text-xs mt-2 leading-relaxed" style={{ color: TEXT_MUTED }}>{q.explain}</p>}
+                <button onClick={handleNext} className="w-full mt-4 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: AMBER, color: BG }}>
+                  {qualQIdx + 1 < qualRun.length ? "Suivant →" : "Terminer"}
+                </button>
+              </>
+            )}
+          </div>
+        </Frame>
+      </div>
+    </div>
+  );
+}
+
+/* --- Épreuve Technique (par secteur) ---------------------------------- */
+function TechnicalView({ ctx }) {
+  const { profile, activeIdx, setView, techCodeInput, setTechCodeInput, techResults, runTechnicalTests } = ctx;
+  const mod = MODULES[activeIdx];
+  const q = mod ? getTechnicalQuestions(mod)[0] : null;
+  const [running, setRunning] = useState(false);
+
+  if (!mod || !q) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: BG, color: TEXT }}>
+        <button onClick={() => setView("map")} className="px-4 py-2 rounded-lg font-mono" style={{ backgroundColor: AMBER, color: BG }}>
+          Retour à la Carte
+        </button>
+      </div>
+    );
+  }
+
+  const done = isTechnicalDone(profile, mod);
+  const allPass = techResults.length > 0 && techResults.every((r) => r.pass);
+
+  async function handleRun() {
+    setRunning(true);
+    await runTechnicalTests();
+    setRunning(false);
+  }
+
+  return (
+    <div className="min-h-screen p-4" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-xl mx-auto">
+        <button onClick={() => setView("map")} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+          <ArrowLeft size={14} /> Retour à la carte
+        </button>
+
+        <div className="flex items-center gap-2 mb-4">
+          <Wrench size={20} style={{ color: mod.accent }} />
+          <h2 className="font-mono font-bold text-lg">Épreuve Technique — {mod.title}</h2>
+          {done && <CheckCircle2 size={18} style={{ color: SUCCESS }} />}
+        </div>
+
+        <Frame accent={mod.accent} className="p-4">
+          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+            <p className="text-sm mb-3 leading-relaxed" style={{ color: TEXT }}>{q.prompt}</p>
+            <textarea
+              value={techCodeInput}
+              onChange={(e) => setTechCodeInput(e.target.value)}
+              spellCheck={false}
+              className="w-full h-40 p-3 rounded-lg font-mono text-xs"
+              style={{ backgroundColor: "#081B33", color: TEXT, border: `1px solid ${LINE}` }}
+            />
+            <button
+              onClick={handleRun}
+              disabled={running}
+              className="w-full mt-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2"
+              style={{ backgroundColor: mod.accent, color: BG }}
+            >
+              <Play size={14} /> {running ? "Exécution…" : "Lancer les tests"}
+            </button>
+
+            {techResults.length > 0 && (
+              <div className="mt-4 space-y-1.5">
+                {techResults.map((r, i) => (
+                  <div key={i} className="flex items-start gap-1.5 font-mono text-xs" style={{ color: r.pass ? SUCCESS : DANGER }}>
+                    {r.pass ? <CheckCircle2 size={14} className="shrink-0 mt-0.5" /> : <XCircle size={14} className="shrink-0 mt-0.5" />}
+                    <span>{r.call} → {r.error ? r.got : show(r.got)} {r.pass ? "" : `(attendu ${show(r.expect)})`}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {allPass && (
+              <p className="text-sm mt-3 font-mono" style={{ color: SUCCESS }}>
+                ✓ Épreuve technique validée{done ? "" : " — +40 XP"} !
+              </p>
+            )}
+            {q.explain && allPass && <p className="text-xs mt-2 leading-relaxed" style={{ color: TEXT_MUTED }}>{q.explain}</p>}
+          </div>
+        </Frame>
+      </div>
+    </div>
+  );
+}
 
 /* --- Daily Seeded Challenge ----------------------------------------- */
 function DailyView({ ctx }) {
@@ -1069,6 +1571,17 @@ function DailyView({ ctx }) {
     setAnswered(true);
   }
   function handleNext() {
+    const isLast = dailyQIdx + 1 >= dailyRun.length;
+    if (isLast) {
+      const todayRef = getDailyReference();
+      persist({
+        ...profile,
+        dailyRuns: {
+          ...(profile.dailyRuns || {}),
+          [todayRef]: { score: dailyScore, total: dailyRun.length, completedISO: new Date().toISOString() },
+        },
+      });
+    }
     setDailyQIdx(i => i + 1);
     setSelected(null);
     setAnswered(false);
@@ -1233,6 +1746,117 @@ function SrsView({ ctx }) {
   );
 }
 
+/* --- Chantier : capstone construit hors de l'app, suivi ici ---------- */
+function ChantierView({ ctx }) {
+  const { profile, setView, aiSettings, toggleMilestone } = ctx;
+  const [openId, setOpenId] = useState(null);
+  const [hints, setHints] = useState({}); // { [milestoneId]: { busy, text, error } }
+
+  const doneCount = CHANTIER.milestones.filter((m) => profile.chantier?.milestones?.[m.id]?.done).length;
+
+  async function requestHint(m) {
+    setHints((h) => ({ ...h, [m.id]: { busy: true, text: "", error: "" } }));
+    const prompt = [
+      "Tu es un mentor technique concis pour un apprenant qui construit un vrai petit projet fullstack seul, hors de cette app.",
+      "Ne donne jamais le code complet de la solution, seulement une piste concrète en 2 à 4 phrases.",
+      `Jalon: ${m.title}`,
+      `Spécification: ${m.spec}`,
+      `Critères d'acceptation: ${m.acceptance.join(" | ")}`,
+      "Réponds en français, ton direct, sans préambule, sans markdown lourd.",
+    ].join("\n");
+    const result = await callAi(prompt, aiSettings);
+    setHints((h) => ({
+      ...h,
+      [m.id]: result.ok ? { busy: false, text: result.text, error: "" } : { busy: false, text: "", error: result.error },
+    }));
+  }
+
+  return (
+    <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+        <button onClick={() => setView("map")} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+          <ArrowLeft size={14} /> Retour à la carte
+        </button>
+
+        <div className="flex items-center gap-2 mb-2">
+          <Hammer size={20} style={{ color: AMBER }} />
+          <h2 className="font-mono font-bold text-xl">{CHANTIER.title}</h2>
+        </div>
+        <p className="text-sm mb-3 leading-relaxed" style={{ color: TEXT_MUTED }}>{CHANTIER.pitch}</p>
+        <p className="font-mono text-[11px] tracking-widest mb-6" style={{ color: AMBER }}>
+          {doneCount}/{CHANTIER.milestones.length} JALONS · CONSTRUIT DANS TON PROPRE ÉDITEUR
+        </p>
+
+        <div className="flex flex-col gap-2">
+          {CHANTIER.milestones.map((m, idx) => {
+            const mod = MODULES.find((x) => x.id === m.moduleRef);
+            const done = !!profile.chantier?.milestones?.[m.id]?.done;
+            const open = openId === m.id;
+            const hint = hints[m.id];
+            return (
+              <Frame key={m.id} accent={done ? SUCCESS : (mod?.accent || LINE)} className="p-3.5">
+                <div style={{ backgroundColor: PANEL }} className="p-3.5 -m-3.5 rounded-sm">
+                  <button className="w-full flex items-center gap-3 text-left" onClick={() => setOpenId(open ? null : m.id)}>
+                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ color: mod?.accent || TEXT_MUTED, border: `1px solid ${mod?.accent || LINE}` }}>
+                      {String(idx + 1).padStart(2, "0")}
+                    </span>
+                    <span className="flex-1 font-mono text-sm font-bold" style={{ color: done ? SUCCESS : TEXT }}>
+                      {m.title}
+                    </span>
+                    {done && <CheckCircle2 size={16} className="shrink-0" style={{ color: SUCCESS }} />}
+                  </button>
+
+                  {open && (
+                    <div className="mt-3 pt-3 border-t" style={{ borderColor: LINE }}>
+                      <p className="text-xs leading-relaxed mb-2" style={{ color: TEXT }}>{m.spec}</p>
+                      <p className="font-mono text-[10px] tracking-widest mb-1" style={{ color: TEXT_MUTED }}>CRITÈRES D'ACCEPTATION</p>
+                      <ul className="mb-3 space-y-1">
+                        {m.acceptance.map((a, i) => (
+                          <li key={i} className="text-xs flex gap-1.5" style={{ color: TEXT_MUTED }}>
+                            <span>·</span><span>{a}</span>
+                          </li>
+                        ))}
+                      </ul>
+
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        <button
+                          onClick={() => toggleMilestone(m.id)}
+                          className="px-3 py-1.5 rounded-lg font-mono text-xs"
+                          style={{ backgroundColor: done ? `${SUCCESS}22` : AMBER, color: done ? SUCCESS : BG, border: `1px solid ${done ? SUCCESS : AMBER}` }}
+                        >
+                          {done ? "✓ Déclaré terminé" : "Je déclare avoir terminé ce jalon"}
+                        </button>
+                        <button
+                          onClick={() => requestHint(m)}
+                          disabled={hint?.busy}
+                          className="px-3 py-1.5 rounded-lg font-mono text-xs"
+                          style={{ backgroundColor: PANEL_SOFT, color: TEXT, border: `1px solid ${LINE}` }}
+                        >
+                          {hint?.busy ? "…" : "💡 Indice (IA locale)"}
+                        </button>
+                      </div>
+
+                      {hint?.text && <p className="text-xs leading-relaxed p-2 rounded" style={{ backgroundColor: PANEL_SOFT, color: TEXT }}>{hint.text}</p>}
+                      {hint?.error && <p className="text-xs leading-relaxed p-2 rounded" style={{ backgroundColor: PANEL_SOFT, color: DANGER }}>{hint.error}</p>}
+                      {!hint?.text && !hint?.error && (
+                        <p className="text-xs italic" style={{ color: TEXT_MUTED }}>Indice de secours : {m.hint}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Frame>
+            );
+          })}
+        </div>
+
+        <p className="mt-6 text-[11px] font-mono text-center" style={{ color: TEXT_MUTED }}>
+          FSQ ne peut pas lire ton dépôt : chaque case cochée est une déclaration sur l'honneur.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* --- Codex : fragments de lore + hauts faits ------------------------- */
 function CodexView({ ctx }) {
   const { profile, setView, badgeCount } = ctx;
@@ -1286,8 +1910,11 @@ function MapView({ ctx }) {
     badgeCount, isUnlocked, nextIdx, startModule, confirmReset, setConfirmReset, resetProgress,
     importText, setImportText, exportProgress, importProgress,
     aiSettings, setAiSettings, aiReady, aiStatus,
-    startDailyChallenge, startSrsSession,
+    startDailyChallenge, startSrsSession, startQualificationExam, startTechnicalTrial,
   } = ctx;
+  const qualified = !!profile.qualification?.passed;
+  const chantierUnlocked = qualified && completedCount >= Math.ceil(MODULES.length / 2);
+  const foundationDone = FOUNDATION_TIER.every((id) => profile.results[id]?.passed);
   return (
     <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
       <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
@@ -1347,7 +1974,7 @@ function MapView({ ctx }) {
         </Frame>
 
         {/* Daily Challenge & SRS Quick Access */}
-        <div className="mt-8 grid grid-cols-2 gap-3 mb-8">
+        <div className="mt-8 grid grid-cols-2 gap-3 mb-3">
           <button
             onClick={() => ctx.startDailyChallenge?.()}
             className="p-4 rounded-lg text-center transition-colors hover:opacity-80"
@@ -1366,6 +1993,48 @@ function MapView({ ctx }) {
           </button>
         </div>
 
+        {/* Examen de Qualification : condition d'accès aux secteurs avancés + au Chantier */}
+        <button
+          onClick={() => foundationDone && startQualificationExam()}
+          disabled={!foundationDone}
+          className="w-full p-4 rounded-lg text-left transition-colors hover:opacity-80 mb-8 flex items-center gap-3 disabled:cursor-not-allowed disabled:opacity-50"
+          style={{ backgroundColor: qualified ? `${SUCCESS}14` : `${AMBER}14`, border: `1px solid ${qualified ? SUCCESS : AMBER}` }}
+        >
+          <GraduationCap size={22} style={{ color: qualified ? SUCCESS : AMBER }} />
+          <div className="flex-1 min-w-0">
+            <p className="font-mono text-xs tracking-widest mb-0.5" style={{ color: qualified ? SUCCESS : AMBER }}>
+              🎓 EXAMEN DE QUALIFICATION {qualified ? "— OBTENU" : ""}
+            </p>
+            <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>
+              {!foundationDone
+                ? "Termine JS, JS Avancé et Async pour pouvoir le tenter"
+                : qualified
+                ? `Débloque les secteurs avancés et le Chantier · meilleur score ${profile.qualification?.bestScore || 0}%`
+                : `Requis pour les secteurs avancés et le Chantier · seuil ${QUALIFICATION_PASS_PCT}% · meilleur score ${profile.qualification?.bestScore || 0}%`}
+            </p>
+          </div>
+          {foundationDone && <ChevronRight size={18} style={{ color: qualified ? SUCCESS : AMBER }} />}
+        </button>
+
+        {/* Chantier : capstone construit hors de l'app */}
+        <button
+          onClick={() => chantierUnlocked && setView("chantier")}
+          disabled={!chantierUnlocked}
+          className="w-full p-4 rounded-lg text-left transition-colors hover:opacity-80 mb-8 flex items-center gap-3 disabled:cursor-not-allowed disabled:opacity-50"
+          style={{ backgroundColor: `${AMBER}14`, border: `1px solid ${AMBER}` }}
+        >
+          {chantierUnlocked ? <Hammer size={22} style={{ color: AMBER }} /> : <Lock size={22} style={{ color: AMBER }} />}
+          <div className="flex-1 min-w-0">
+            <p className="font-mono text-xs tracking-widest mb-0.5" style={{ color: AMBER }}>🛠 CHANTIER — CONSTRUIS UN VRAI PROJET</p>
+            <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>
+              {chantierUnlocked
+                ? `${CHANTIER.milestones.filter((m) => profile.chantier?.milestones?.[m.id]?.done).length}/${CHANTIER.milestones.length} jalons · dans ton propre éditeur`
+                : `Débloqué avec la Qualification + ${Math.ceil(MODULES.length / 2)} secteurs purifiés`}
+            </p>
+          </div>
+          {chantierUnlocked && <ChevronRight size={18} style={{ color: AMBER }} />}
+        </button>
+
         {/* Chemin des secteurs */}
         <div className="mt-8">
           {MODULES.map((mod, idx) => {
@@ -1374,6 +2043,10 @@ function MapView({ ctx }) {
             const passed = !!result?.passed;
             const best = result?.bestScore;
             const isNext = unlocked && !passed && idx === nextIdx;
+            const prevPassed = idx === 0 || !!profile.results[MODULES[idx - 1].id]?.passed;
+            const blockedByQualification = !unlocked && prevPassed && ADVANCED_TIER.includes(mod.id) && !qualified;
+            const techUnlocked = isTechnicalUnlocked(profile, mod);
+            const techDone = isTechnicalDone(profile, mod);
 
             return (
               <div key={mod.id}>
@@ -1389,6 +2062,8 @@ function MapView({ ctx }) {
                   <div className="relative shrink-0 w-16 h-16 rounded-xl flex items-center justify-center" style={{ backgroundColor: unlocked ? `${mod.accent}18` : PANEL_SOFT, border: `1px solid ${unlocked ? mod.accent : LINE}` }}>
                     {unlocked ? (
                       <BossAvatar kind={mod.boss.kind} accent={mod.accent} state={passed ? "defeated" : "idle"} size={54} />
+                    ) : blockedByQualification ? (
+                      <GraduationCap size={20} style={{ color: TEXT_MUTED }} />
                     ) : (
                       <Lock size={20} style={{ color: TEXT_MUTED }} />
                     )}
@@ -1400,7 +2075,7 @@ function MapView({ ctx }) {
                   <div className="flex-1 min-w-0">
                     <p className="font-mono font-bold text-sm sm:text-base truncate" style={{ color: unlocked ? TEXT : TEXT_MUTED }}>{mod.title}</p>
                     <p className="text-[11px] font-mono truncate" style={{ color: unlocked ? mod.accent : TEXT_MUTED }}>
-                      {unlocked ? `${mod.boss.name} — ${mod.boss.epithet}` : "Secteur scellé"}
+                      {unlocked ? `${mod.boss.name} — ${mod.boss.epithet}` : blockedByQualification ? "Nécessite l'Examen de Qualification" : "Secteur scellé"}
                     </p>
                     <p className="text-[11px] font-mono mt-0.5" style={{ color: passed ? SUCCESS : isNext ? AMBER : TEXT_MUTED }}>
                       {!unlocked ? "Verrouillé" : passed ? `Purifié — record ${best}%${result?.flawless ? " · sans dégât" : ""}` : isNext ? "▶ PROCHAIN DUEL" : best ? `Échec — dernier ${best}%` : "Prêt au combat"}
@@ -1409,6 +2084,26 @@ function MapView({ ctx }) {
 
                   {unlocked && <ChevronRight size={20} className="shrink-0 transition-transform group-hover:translate-x-0.5" style={{ color: mod.accent }} />}
                 </button>
+
+                {passed && (
+                  techDone ? (
+                    <div className="ml-[76px] mt-1 flex items-center gap-1.5 font-mono text-[10px]" style={{ color: SUCCESS }}>
+                      <Wrench size={11} /> Épreuve Technique certifiée
+                    </div>
+                  ) : techUnlocked ? (
+                    <button
+                      onClick={() => startTechnicalTrial(idx)}
+                      className="ml-[76px] mt-1 flex items-center gap-1.5 font-mono text-[10px] hover:opacity-80"
+                      style={{ color: mod.accent }}
+                    >
+                      <Wrench size={11} /> Épreuve Technique disponible →
+                    </button>
+                  ) : (
+                    <div className="ml-[76px] mt-1 flex items-center gap-1.5 font-mono text-[10px]" style={{ color: TEXT_MUTED }}>
+                      <Wrench size={11} /> Épreuve Technique dès {TECHNICAL_UNLOCK_PCT}% de record (actuel {best}%)
+                    </div>
+                  )
+                )}
               </div>
             );
           })}
@@ -1531,7 +2226,7 @@ function IntroView({ ctx }) {
         <div className="flex flex-col gap-3 mb-6">
           <DialogueBubble name={mod.boss.name} text={`« ${mod.boss.taunt} »`} accent={mod.accent} side="right"
             avatar={<div className="w-12 h-12 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${mod.accent}` }}><Skull size={20} style={{ color: mod.accent }} /></div>} />
-          <DialogueBubble name="ADA" text={`${mod.intro} Survis à ce duel — 3 cœurs, ${mod.questions.length} assauts — et le secteur sera purifié.`} accent="#8ECAE6"
+          <DialogueBubble name="ADA" text={`${mod.intro} Survis à ce duel — 3 cœurs, ${getBattleQuestions(mod).length} assauts — et le secteur sera purifié.`} accent="#8ECAE6"
             avatar={<AdaAvatar mood="idle" size={48} />} />
         </div>
 
@@ -1554,8 +2249,9 @@ function BattleView({ ctx }) {
     askLocalHint, aiHint, aiBusy, aiError, clearAiHint,
   } = ctx;
   const mod = MODULES[activeIdx];
-  const q = mod.questions[qIdx];
-  const isLast = qIdx === mod.questions.length - 1;
+  const battleQuestions = getBattleQuestions(mod);
+  const q = battleQuestions[qIdx];
+  const isLast = qIdx === battleQuestions.length - 1;
   const critical = bossHP <= 0.5;
   const success =
     q.type === "code" ? selected === "code"
@@ -1637,7 +2333,7 @@ function BattleView({ ctx }) {
 
         {/* progression assauts */}
         <div className="flex items-center justify-between font-mono text-[11px] mb-2" style={{ color: TEXT_MUTED }}>
-          <span>ASSAUT {qIdx + 1} / {mod.questions.length}</span>
+          <span>ASSAUT {qIdx + 1} / {battleQuestions.length}</span>
           <span style={{ color: AMBER }}>+{runXP} XP</span>
         </div>
 
@@ -1946,6 +2642,15 @@ export default function FullstackQuest() {
   const [srsSessionItems, setSrsSessionItems] = useState([]);
   const [srsSessionIdx, setSrsSessionIdx] = useState(0);
 
+  // Examen de Qualification (tronc commun -> paliers avancés)
+  const [qualRun, setQualRun] = useState(null);
+  const [qualQIdx, setQualQIdx] = useState(0);
+  const [qualScore, setQualScore] = useState(0);
+
+  // Épreuve Technique (par secteur)
+  const [techCodeInput, setTechCodeInput] = useState("");
+  const [techResults, setTechResults] = useState([]);
+
   const floatId = useRef(0);
 
   SFX.on = soundOn;
@@ -1981,7 +2686,7 @@ export default function FullstackQuest() {
   // Initialise l'état d'un défi pratique quand on arrive dessus
   useEffect(() => {
     if (view !== "battle" || activeIdx == null) return;
-    const q = MODULES[activeIdx]?.questions[qIdx];
+    const q = getBattleQuestions(MODULES[activeIdx] || { questions: [] })[qIdx];
     if (!q) return;
     if (q.type === "code") { setCodeInput(q.starter || ""); setTestResults([]); setCodeAttempts(0); }
     else if (q.type === "order") { setOrderWork(shuffleIndices(q.lines.length)); }
@@ -2000,7 +2705,10 @@ export default function FullstackQuest() {
 
   function isUnlocked(idx) {
     if (idx === 0) return true;
-    return !!profile.results[MODULES[idx - 1].id]?.passed;
+    if (!profile.results[MODULES[idx - 1].id]?.passed) return false;
+    const mod = MODULES[idx];
+    if (ADVANCED_TIER.includes(mod.id) && !profile.qualification?.passed) return false;
+    return true;
   }
 
   function setAda(line, mood) { setAdaLine(line); setAdaMood(mood); }
@@ -2047,6 +2755,13 @@ export default function FullstackQuest() {
 
   function startSrsSession() {
     const allQ = collectAllQuestions(MODULES);
+    const withQuestions = (dueList) => dueList
+      .map((d) => {
+        const idx = Number(d.qId.slice(2));
+        const q = allQ[idx];
+        return q ? { ...d, ...q } : null;
+      })
+      .filter(Boolean);
     const due = getDueItems(profile.srsState || {});
     if (due.length === 0) {
       // Initialize SRS for all questions if none exist
@@ -2057,7 +2772,7 @@ export default function FullstackQuest() {
         });
         persist({ ...profile, srsState: newSrsState });
         const initDue = getDueItems(newSrsState);
-        setSrsSessionItems(initDue.slice(0, 10)); // Max 10 per session
+        setSrsSessionItems(withQuestions(initDue).slice(0, 10)); // Max 10 per session
         setSrsSessionIdx(0);
         setView("srs");
       } else {
@@ -2065,9 +2780,63 @@ export default function FullstackQuest() {
       }
       return;
     }
-    setSrsSessionItems(due.slice(0, 20)); // Max 20 due items per session
+    setSrsSessionItems(withQuestions(due).slice(0, 20)); // Max 20 due items per session
     setSrsSessionIdx(0);
     setView("srs");
+  }
+
+  // Examen de Qualification : condition d'accès aux secteurs avancés + au Chantier.
+  function startQualificationExam() {
+    const foundationModules = MODULES.filter((m) => FOUNDATION_TIER.includes(m.id));
+    const pool = collectAllQuestions(foundationModules).filter((q) => q.type !== "code" && q.type !== "order");
+    const seed = Math.floor(Math.random() * 2 ** 31);
+    const run = sampleWithRng(pool, Math.min(QUALIFICATION_SIZE, pool.length), seed);
+    setQualRun(run);
+    setQualQIdx(0);
+    setQualScore(0);
+    setView("qualification");
+  }
+
+  function finishQualificationExam() {
+    const total = qualRun?.length || 1;
+    const pct = Math.round((qualScore / total) * 100);
+    const passed = pct >= QUALIFICATION_PASS_PCT;
+    persist({
+      ...profile,
+      qualification: {
+        passed: passed || !!profile.qualification?.passed,
+        bestScore: Math.max(profile.qualification?.bestScore || 0, pct),
+        attempts: (profile.qualification?.attempts || 0) + 1,
+      },
+    });
+    return { pct, passed };
+  }
+
+  // Épreuve Technique : exercice code/débogage d'un secteur, débloqué séparément.
+  function startTechnicalTrial(idx) {
+    const mod = MODULES[idx];
+    if (!mod || !isTechnicalUnlocked(profile, mod)) return;
+    setActiveIdx(idx);
+    const q = getTechnicalQuestions(mod)[0];
+    setTechCodeInput(q?.starter || "");
+    setTechResults([]);
+    setView("technical");
+  }
+
+  async function runTechnicalTests() {
+    const mod = MODULES[activeIdx];
+    const q = getTechnicalQuestions(mod)[0];
+    if (!q) return;
+    const res = await runCode(techCodeInput, q.tests);
+    setTechResults(res);
+    const allPass = res.length > 0 && res.every((r) => r.pass);
+    if (allPass && !isTechnicalDone(profile, mod)) {
+      const nextTechnical = { ...(profile.technical || {}), [mod.id]: { passed: true, completedISO: new Date().toISOString() } };
+      const earned = new Set(profile.badges || []);
+      const allDone = MODULES.every((m) => nextTechnical[m.id]?.passed);
+      if (allDone) earned.add("technical_master");
+      persist({ ...profile, xp: profile.xp + 40, badges: [...earned], technical: nextTechnical });
+    }
   }
 
   function engage() {
@@ -2077,7 +2846,7 @@ export default function FullstackQuest() {
 
   // Coup réussi (QCM correct, tests au vert, ordre juste)
   function landHit() {
-    const len = MODULES[activeIdx].questions.length;
+    const len = getBattleQuestions(MODULES[activeIdx]).length;
     const nc = combo + 1;
     setCombo(nc);
     setComboMax((m) => Math.max(m, nc));
@@ -2109,17 +2878,17 @@ export default function FullstackQuest() {
 
   function selectAnswer(i) {
     if (answered) return;
-    const q = MODULES[activeIdx].questions[qIdx];
+    const q = getBattleQuestions(MODULES[activeIdx])[qIdx];
     setSelected(i);
     setAnswered(true);
     if (i === q.correct) landHit(); else hurt();
   }
 
   // Défi CODE : exécute les tests ; tout au vert = coup porté (itération libre, pas de perte de cœur)
-  function runTests() {
+  async function runTests() {
     if (answered) return;
-    const q = MODULES[activeIdx].questions[qIdx];
-    const res = runCode(codeInput, q.tests);
+    const q = getBattleQuestions(MODULES[activeIdx])[qIdx];
+    const res = await runCode(codeInput, q.tests);
     setTestResults(res);
     const allPass = res.length > 0 && res.every((r) => r.pass);
     if (allPass) {
@@ -2156,7 +2925,7 @@ export default function FullstackQuest() {
   function nextQuestion() {
     if (dead) { finishBattle(false); return; }
     const mod = MODULES[activeIdx];
-    if (qIdx + 1 < mod.questions.length) {
+    if (qIdx + 1 < getBattleQuestions(mod).length) {
       setQIdx((q) => q + 1);
       setSelected(null);
       setAnswered(false);
@@ -2167,7 +2936,7 @@ export default function FullstackQuest() {
 
   function finishBattle(survived) {
     const mod = MODULES[activeIdx];
-    const len = mod.questions.length;
+    const len = getBattleQuestions(mod).length;
     const pct = Math.round((runCorrect / len) * 100);
     const passed = survived;
     const flawless = passed && lives === 3;
@@ -2206,7 +2975,7 @@ export default function FullstackQuest() {
     const leveledTo = getLevelInfo(newXP).label !== oldLabel ? getLevelInfo(newXP).label : null;
     const bestCombo = Math.max(profile.bestCombo || 0, comboMax);
 
-    persist({ xp: newXP, results, badges: [...earned], lore, bestCombo });
+    persist({ ...profile, xp: newXP, results, badges: [...earned], lore, bestCombo });
 
     setLastRun({ passed, pct, xpGain, comboMax, livesLeft: lives, flawless, perfect, newBadges: newly, loreUnlocked, leveledTo });
     if (passed) { SFX.victory(); if (leveledTo) window.setTimeout(() => SFX.levelup(), 550); }
@@ -2224,6 +2993,37 @@ export default function FullstackQuest() {
     await persist({ ...FRESH });
     setConfirmReset(false);
     setView("map");
+  }
+
+  // Coche/décoche un jalon du Chantier. Le XP n'est accordé qu'une seule fois par
+  // jalon (via completedISO conservé) pour ne pas pouvoir le farmer en décochant/recochant.
+  function toggleMilestone(id) {
+    const current = profile.chantier?.milestones || {};
+    const prevEntry = current[id] || {};
+    const nowDone = !prevEntry.done;
+    const firstTimeEver = nowDone && !prevEntry.completedISO;
+    const nextMilestones = {
+      ...current,
+      [id]: { done: nowDone, completedISO: nowDone ? (prevEntry.completedISO || new Date().toISOString()) : (prevEntry.completedISO || null) },
+    };
+
+    const earned = new Set(profile.badges || []);
+    let xpGain = 0;
+    if (firstTimeEver) {
+      xpGain += 30;
+      const totalDone = CHANTIER.milestones.filter((m) => nextMilestones[m.id]?.done).length;
+      if (totalDone === CHANTIER.milestones.length && !earned.has("chantier_done")) {
+        earned.add("chantier_done");
+        xpGain += 150;
+      }
+    }
+
+    persist({
+      ...profile,
+      xp: profile.xp + xpGain,
+      badges: [...earned],
+      chantier: { milestones: nextMilestones },
+    });
   }
 
   function exportProgress() {
@@ -2260,7 +3060,7 @@ export default function FullstackQuest() {
 
   function buildLocalAIPrompt() {
     const mod = MODULES[activeIdx];
-    const q = mod?.questions[qIdx];
+    const q = mod ? getBattleQuestions(mod)[qIdx] : null;
     if (!mod || !q) return "";
     const kind = q.type || "qcm";
     const parts = [
@@ -2282,62 +3082,24 @@ export default function FullstackQuest() {
   async function askLocalHint() {
     if (activeIdx == null) return;
     const mod = MODULES[activeIdx];
-    const q = mod?.questions[qIdx];
+    const q = mod ? getBattleQuestions(mod)[qIdx] : null;
     if (!q) return;
     setAiBusy(true);
     setAiError("");
     setAiHint("");
 
-    const endpoint = String(aiSettings.endpoint || "").replace(/\/$/, "");
     const prompt = buildLocalAIPrompt();
-
-    try {
-      let text = "";
-      if (aiSettings.provider === "openai") {
-        const res = await fetch(`${endpoint}/chat/completions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: aiSettings.model,
-            messages: [
-              { role: "system", content: "Tu es un coach de révision concis et prudent. Ne donne jamais la réponse brute." },
-              { role: "user", content: prompt },
-            ],
-            temperature: 0.2,
-            stream: false,
-          }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        text = data?.choices?.[0]?.message?.content || "";
-      } else {
-        const res = await fetch(`${endpoint}/api/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: aiSettings.model,
-            prompt,
-            stream: false,
-            options: { temperature: 0.2 },
-          }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        text = data?.response || "";
-      }
-
-      const cleaned = String(text).trim();
-      if (!cleaned) throw new Error("Réponse vide");
-      setAiHint(cleaned);
+    const result = await callAi(prompt, aiSettings);
+    if (result.ok) {
+      setAiHint(result.text);
       setAiReady(true);
       setAiStatus(`Connecté à ${aiSettings.provider} · ${aiSettings.model}`);
-    } catch (e) {
+    } else {
       setAiReady(false);
       setAiStatus("Serveur local non joignable.");
-      setAiError(`IA locale indisponible: ${String(e?.message || e)}. Lance ton serveur local puis réessaie.`);
-    } finally {
-      setAiBusy(false);
+      setAiError(result.error);
     }
+    setAiBusy(false);
   }
 
   const completedCount = MODULES.filter((m) => profile.results[m.id]?.passed).length;
@@ -2367,6 +3129,9 @@ export default function FullstackQuest() {
     selectAnswer, runTests, moveLine, validateOrder, nextQuestion,
     dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, startDailyChallenge,
     srsSessionItems, srsSessionIdx, setSrsSessionIdx, startSrsSession, persist,
+    toggleMilestone,
+    qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, startQualificationExam, finishQualificationExam,
+    techCodeInput, setTechCodeInput, techResults, startTechnicalTrial, runTechnicalTests,
   };
 
   /* ------------------------------ ROUTAGE ------------------------------ */
@@ -2376,6 +3141,9 @@ export default function FullstackQuest() {
   if (view === "result") return <><ResultView ctx={ctx} /><InstallPrompt /></>;
   if (view === "daily") return <><DailyView ctx={ctx} /><InstallPrompt /></>;
   if (view === "srs") return <><SrsView ctx={ctx} /><InstallPrompt /></>;
+  if (view === "chantier") return <><ChantierView ctx={ctx} /><InstallPrompt /></>;
+  if (view === "qualification") return <><QualificationView ctx={ctx} /><InstallPrompt /></>;
+  if (view === "technical") return <><TechnicalView ctx={ctx} /><InstallPrompt /></>;
   return <><MapView ctx={ctx} /><InstallPrompt /></>;
 }
 

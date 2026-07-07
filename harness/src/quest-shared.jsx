@@ -1,6 +1,6 @@
 import React from "react";
 import {
-  Heart, Loader2, Flame, Swords, Shield, Trophy, Star, Crown,
+  Heart, Loader2, Flame, Swords, Shield, Trophy, Star, Crown, Hammer, Wrench,
 } from "lucide-react";
 
 export const BG = "#0B2545";
@@ -41,6 +41,8 @@ export const BADGES = {
   perfectionist: { Icon: Star, label: "Perfection", desc: "100 % de bonnes réponses sur un secteur." },
   half_way:      { Icon: Trophy, label: "Mi-Parcours", desc: "Purifier la moitié de la Stack." },
   guardian:      { Icon: Crown, label: "Gardien de la Stack", desc: "Terrasser OVERFLOW et sauver la Stack." },
+  chantier_done: { Icon: Hammer, label: "Chantier Livré", desc: "Terminer les 14 jalons du Chantier Fullstack — un vrai projet construit de tes mains." },
+  technical_master: { Icon: Wrench, label: "Certifié Technique", desc: "Réussir l'Épreuve Technique des 9 secteurs." },
 };
 
 export const ADA_LINES = {
@@ -68,16 +70,17 @@ export function show(v) {
   try { const s = JSON.stringify(v); return s === undefined ? String(v) : s; } catch { return String(v); }
 }
 
-export function runCode(userCode, tests) {
-  return tests.map((t) => {
+export async function runCode(userCode, tests) {
+  return Promise.all(tests.map(async (t) => {
     try {
       const fn = new Function(`"use strict";\n${userCode}\n;return (${t.call});`);
-      const got = fn();
+      let got = fn();
+      if (got && typeof got.then === "function") got = await got;
       return { call: t.call, expect: t.expect, got, pass: deepEqual(got, t.expect), error: false };
     } catch (e) {
       return { call: t.call, expect: t.expect, got: String(e && e.message ? e.message : e), pass: false, error: true };
     }
-  });
+  }));
 }
 
 // AI helper: calls configured AI server (Vite env `VITE_AI_SERVER_URL`), falls back to localhost.
