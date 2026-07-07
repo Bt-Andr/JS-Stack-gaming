@@ -26,7 +26,8 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - VITE_AI_SERVER_URL=http://ai-server:8000
+      # Must be reachable from the browser, not just the Docker network — use localhost.
+      - VITE_AI_SERVER_URL=http://localhost:8000
       - VITE_AI_API_TOKEN=
     depends_on:
       - ai-server

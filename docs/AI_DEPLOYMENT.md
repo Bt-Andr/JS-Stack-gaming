@@ -22,6 +22,22 @@ Render field recommendations
 - Docker Context: `/ai-server` (or `.` if Dockerfile is at repo root).
 - Port: 8000
 
+Securing the endpoint (do this before going live)
+--------------------------------------------------
+Without these two env vars, `/api/v1/generate` is an **unauthenticated public proxy** —
+anyone who finds the URL can call it, and if you're forwarding to a paid
+`openai_compatible` upstream, they call it at your expense.
+
+- `AI_API_KEY`: set to a random secret. Requests must then send it back as the
+  `X-API-Key` header (the frontend already does this via `VITE_AI_API_TOKEN`).
+  Note this only stops casual abuse — `VITE_*` values are bundled into the
+  frontend's JS and visible to anyone opening DevTools.
+- `AI_ALLOWED_ORIGINS`: set to your deployed frontend's origin, e.g.
+  `https://my-app.vercel.app`. Defaults to `*` (any site can call it from a
+  visitor's browser) if unset.
+
+The server logs a warning at startup if either is left at its permissive default.
+
 Vercel configuration
 ---------------------
 After your AI service is deployed on Render (or another provider), configure the frontend deployed on Vercel to call it:
@@ -44,7 +60,7 @@ docker-compose up --build
 
 2. The frontend will be available at `http://localhost:5173` and the AI server at `http://localhost:8000`.
 
-3. The frontend reads the server URL from `import.meta.env.VITE_AI_SERVER_URL` at build time. For local dev via the provided `docker-compose.yml`, the `frontend` service sets `VITE_AI_SERVER_URL` to `http://ai-server:8000` so calls from the container reach the ai-server by its Compose hostname.
+3. The frontend reads the server URL from `import.meta.env.VITE_AI_SERVER_URL` at build time. The fetch happens in the user's *browser*, not inside the container, so this must be an address the browser can reach — e.g. `http://localhost:8000` — not the Compose service hostname (`http://ai-server:8000`), which only resolves between containers.
 
 Replacing the stub with a real model
 -----------------------------------

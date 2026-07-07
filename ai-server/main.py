@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Optional
 
@@ -6,19 +7,41 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+logger = logging.getLogger("fsq-ai-server")
+
 app = FastAPI(title="FSQ AI Stub Server")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 AI_PROVIDER = os.getenv("AI_PROVIDER", "stub").strip().lower()
 AI_UPSTREAM_URL = os.getenv("AI_UPSTREAM_URL", "").strip().rstrip("/")
 AI_API_KEY = os.getenv("AI_API_KEY", "").strip()
 AI_MODEL = os.getenv("AI_MODEL", "").strip()
+
+# Comma-separated list of allowed origins, e.g. "https://my-app.vercel.app".
+# Defaults to "*" for local dev; set AI_ALLOWED_ORIGINS in production.
+_origins_env = os.getenv("AI_ALLOWED_ORIGINS", "*").strip()
+ALLOWED_ORIGINS = ["*"] if _origins_env == "*" else [o.strip() for o in _origins_env.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+if AI_PROVIDER != "stub" and not AI_API_KEY:
+    logger.warning(
+        "AI_PROVIDER=%s is set but AI_API_KEY is empty: this endpoint is an "
+        "UNAUTHENTICATED public proxy to %s. Set AI_API_KEY before deploying "
+        "publicly, especially if the upstream provider bills per request.",
+        AI_PROVIDER, AI_UPSTREAM_URL or "(no upstream configured)",
+    )
+if ALLOWED_ORIGINS == ["*"]:
+    logger.warning(
+        "AI_ALLOWED_ORIGINS is not set: CORS allows any website to call this "
+        "API from a visitor's browser. Set it to your deployed frontend's "
+        "origin (e.g. https://my-app.vercel.app) in production."
+    )
 
 
 class GenerateRequest(BaseModel):
