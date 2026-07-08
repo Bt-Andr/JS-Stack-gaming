@@ -57,6 +57,32 @@ personal use or sharing with friends/family; don't use it for sensitive data.
 If the env vars are left empty, the profile routes return `503` and the app
 falls back to `localStorage` only (still works, just doesn't sync).
 
+Central question bank (optional)
+---------------------------------
+The `ai-server` also serves a centrally-managed question bank that merges into
+the game's static questions on every device (offline-first: the app caches the
+bank in localStorage and falls back to static questions without network).
+
+1. Create a free Postgres database at https://neon.tech and copy its connection
+   string.
+2. Set on Render: `DATABASE_URL` (the Neon string — the schema is created
+   automatically at first connection) and `ADMIN_API_KEY` (a long random secret,
+   deliberately distinct from `AI_API_KEY`: the public key must never grant
+   write access to the bank).
+3. In the app, open the map's "Administration" panel, paste the admin key, and
+   use the admin view to author QCM / code / order questions. Code exercises
+   can't be published until a reference solution passes their tests.
+
+Verification after deploy: `curl https://<render-url>/api/v1/questions` should
+return `{"questions":[]}` (or your questions). Empty env vars -> clean 503s and
+the app plays static-only.
+
+Local-dev CORS gotcha: if you open the admin view from `http://localhost:5173`
+against the deployed Render server, `AI_ALLOWED_ORIGINS` on Render must include
+`http://localhost:5173` too (comma-separated), and `harness/.env.local` needs
+`VITE_AI_SERVER_URL=https://<render-url>` so the harness targets Render instead
+of `localhost:8000`.
+
 Vercel configuration
 ---------------------
 After your AI service is deployed on Render (or another provider), configure the frontend deployed on Vercel to call it:
