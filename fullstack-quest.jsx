@@ -1237,6 +1237,25 @@ const AI_DEFAULT = {
 };
 const SYNC_SETTINGS_KEY = "fullstack-quest-sync-settings";
 const SYNC_DEFAULT = { serverUrl: "", account: "", pin: "" };
+
+// URL de ton ai-server déployé, injectée au build (Vercel: variable VITE_AI_SERVER_URL).
+const ENV_AI_SERVER_URL =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_AI_SERVER_URL) || "";
+
+const CUSTOM_ENDPOINT = "__custom__";
+
+function getEndpointPresets(provider) {
+  if (provider === "fsq-server") {
+    const presets = [];
+    if (ENV_AI_SERVER_URL) presets.push({ label: "Serveur FSQ déployé (Render)", value: ENV_AI_SERVER_URL });
+    presets.push({ label: "Serveur FSQ (local)", value: "http://localhost:8000" });
+    return presets;
+  }
+  if (provider === "openai") {
+    return [{ label: "OpenAI-compatible (local)", value: "http://localhost:1234/v1" }];
+  }
+  return [{ label: "Ollama (local)", value: "http://localhost:11434" }];
+}
 /* ---------------------------------------------------------------------- */
 /*  COMPOSANT PRINCIPAL                                                    */
 /* ---------------------------------------------------------------------- */
@@ -2213,25 +2232,52 @@ function MapView({ ctx }) {
                 Moteur
                 <select
                   value={aiSettings.provider}
-                  onChange={(e) => setAiSettings((s) => ({ ...s, provider: e.target.value }))}
-                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                  onChange={(e) => {
+                    const provider = e.target.value;
+                    const presets = getEndpointPresets(provider);
+                    setAiSettings((s) => ({ ...s, provider, endpoint: presets[0]?.value || s.endpoint }));
+                  }}
+                  className="px-2 py-2 rounded-md focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT, backgroundColor: PANEL_SOFT }}
                 >
-                  <option value="ollama">Ollama</option>
-                  <option value="openai">OpenAI-compatible</option>
-                  <option value="fsq-server">Serveur FSQ (ai-server / Render)</option>
+                  <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value="ollama">Ollama</option>
+                  <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value="openai">OpenAI-compatible</option>
+                  <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value="fsq-server">Serveur FSQ (ai-server / Render)</option>
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                Endpoint
-                <input
-                  value={aiSettings.endpoint}
-                  onChange={(e) => setAiSettings((s) => ({ ...s, endpoint: e.target.value }))}
-                  placeholder={aiSettings.provider === "fsq-server" ? "https://mon-ai-service.onrender.com" : undefined}
-                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
-                />
-              </label>
+              {(() => {
+                const presets = getEndpointPresets(aiSettings.provider);
+                const matched = presets.find((p) => p.value === aiSettings.endpoint);
+                const isCustom = !matched;
+                return (
+                  <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                    Endpoint
+                    <select
+                      value={isCustom ? CUSTOM_ENDPOINT : matched.value}
+                      onChange={(e) => {
+                        if (e.target.value === CUSTOM_ENDPOINT) return;
+                        setAiSettings((s) => ({ ...s, endpoint: e.target.value }));
+                      }}
+                      className="px-2 py-2 rounded-md focus:outline-none"
+                      style={{ border: `1px solid ${LINE}`, color: TEXT, backgroundColor: PANEL_SOFT }}
+                    >
+                      {presets.map((p) => (
+                        <option key={p.value} style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value={p.value}>{p.label}</option>
+                      ))}
+                      <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value={CUSTOM_ENDPOINT}>Personnalisé…</option>
+                    </select>
+                    {isCustom && (
+                      <input
+                        value={aiSettings.endpoint}
+                        onChange={(e) => setAiSettings((s) => ({ ...s, endpoint: e.target.value }))}
+                        placeholder="https://..."
+                        className="mt-1 px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                        style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                      />
+                    )}
+                  </label>
+                );
+              })()}
               <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
                 Modèle
                 <input
