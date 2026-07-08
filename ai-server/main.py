@@ -7,8 +7,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger("fsq-ai-server")
@@ -32,6 +33,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Starlette's default handler for uncaught exceptions returns a plain-text 500
+# from OUTSIDE the CORS middleware, so the browser never sees an
+# Access-Control-Allow-Origin header and misreports the failure as a CORS
+# error instead of the real 500. Catching it here keeps the response inside
+# the app (and therefore inside CORSMiddleware) so the real error is visible.
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": f"Internal server error: {exc}"})
 
 if AI_PROVIDER != "stub" and not AI_API_KEY:
     logger.warning(
@@ -79,10 +91,15 @@ async def _generate_stub(prompt: str, max_tokens: int) -> str:
 async def _generate_ollama(prompt: str, max_tokens: int) -> str:
     upstream = AI_UPSTREAM_URL or "http://localhost:11434"
     payload = {"model": AI_MODEL or "llama3.1", "prompt": prompt, "stream": False, "options": {"num_predict": max_tokens}}
-    async with httpx.AsyncClient(timeout=120) as client:
-        res = await client.post(f"{upstream}/api/generate", json=payload)
-        res.raise_for_status()
-        data = res.json()
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            res = await client.post(f"{upstream}/api/generate", json=payload)
+            res.raise_for_status()
+            data = res.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Ollama a renvoyé une erreur ({e.response.status_code}): {e.response.text[:500]}")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Impossible de joindre Ollama à {upstream}: {e}")
     return data.get("response", "")
 
 
@@ -96,10 +113,15 @@ async def _call_chat_completions(base_url: str, api_key: str, model: str, prompt
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    async with httpx.AsyncClient(timeout=120) as client:
-        res = await client.post(f"{base_url.rstrip('/')}/chat/completions", json=payload, headers=headers)
-        res.raise_for_status()
-        data = res.json()
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            res = await client.post(f"{base_url.rstrip('/')}/chat/completions", json=payload, headers=headers)
+            res.raise_for_status()
+            data = res.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Le fournisseur amont a renvoyé une erreur ({e.response.status_code}): {e.response.text[:500]}")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Impossible de joindre le fournisseur amont ({base_url}): {e}")
     choices = data.get("choices") or []
     if not choices:
         return ""
