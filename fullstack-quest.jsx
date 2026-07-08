@@ -23,7 +23,7 @@ import {
   Lock, Check, ChevronRight, ArrowLeft, RotateCcw, Skull,
   Volume2, VolumeX, BookOpen, MessageSquareText,
   Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle, Hammer,
-  GraduationCap, Wrench, RefreshCw, Cloud
+  GraduationCap, Wrench, RefreshCw, Cloud, Plus, Trash2, Pencil, Database
 } from "lucide-react";
 import {
   BG, PANEL, PANEL_SOFT, LINE, TEXT, TEXT_MUTED, AMBER, SUCCESS, DANGER,
@@ -1299,6 +1299,21 @@ const AI_DEFAULT = {
 };
 const SYNC_SETTINGS_KEY = "fullstack-quest-sync-settings";
 const SYNC_DEFAULT = { serverUrl: "", account: "", pin: "" };
+const ADMIN_KEY_STORAGE = "fullstack-quest-admin-key";
+
+function bankApiBase() {
+  return (ENV_AI_SERVER_URL || "http://localhost:8000").replace(/\/$/, "");
+}
+
+async function adminFetch(path, adminKey, opts = {}) {
+  const res = await fetch(`${bankApiBase()}${path}`, {
+    ...opts,
+    headers: { "Content-Type": "application/json", "X-Admin-Key": adminKey, ...(opts.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `HTTP ${res.status}`);
+  return body;
+}
 
 // URL de ton ai-server déployé, injectée au build (Vercel: variable VITE_AI_SERVER_URL).
 const ENV_AI_SERVER_URL =
@@ -1992,6 +2007,335 @@ function ChantierView({ ctx }) {
   );
 }
 
+/* --- Admin : enrichir la banque de questions centrale ----------------- */
+const EMPTY_FORM = {
+  moduleId: "js-fond", qtype: "qcm", technical: false,
+  prompt: "", explain: "", code: "",
+  options: ["", ""], correct: 0,
+  starter: "", tests: [{ call: "", expect: "" }],
+  lines: ["", ""],
+};
+
+function AdminView({ ctx }) {
+  const { setView, adminKey, refreshBank } = ctx;
+  const [tab, setTab] = useState("list"); // list | form
+  const [editingId, setEditingId] = useState(null);
+  const [list, setList] = useState([]);
+  const [listBusy, setListBusy] = useState(false);
+  const [filterModule, setFilterModule] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  // Vérification de cohérence des exercices code : une solution de référence
+  // doit passer les tests avant de pouvoir publier.
+  const [solution, setSolution] = useState("");
+  const [solResults, setSolResults] = useState(null);
+
+  const f = (patch) => { setForm((s) => ({ ...s, ...patch })); setSolResults(null); };
+
+  async function loadList() {
+    setListBusy(true);
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (filterModule) params.set("module", filterModule);
+      if (filterStatus) params.set("status", filterStatus);
+      const qs = params.toString();
+      const data = await adminFetch(`/api/v1/admin/questions${qs ? `?${qs}` : ""}`, adminKey);
+      setList(data.questions || []);
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setListBusy(false);
+    }
+  }
+
+  useEffect(() => { loadList(); }, [filterModule, filterStatus]);
+
+  function parsedTests() {
+    // expect est saisi en JSON (4, "abc", [2,4], {"a":1}) pour distinguer types et structures.
+    return form.tests.map((t) => ({ call: t.call, expect: JSON.parse(t.expect) }));
+  }
+
+  async function testSolution() {
+    setError("");
+    try {
+      const res = await runCode(solution, parsedTests());
+      setSolResults(res);
+    } catch (e) {
+      setError(`Tests illisibles: ${String(e?.message || e)} — chaque "attendu" doit être du JSON valide.`);
+    }
+  }
+
+  const solutionOk = form.qtype !== "code" || (solResults && solResults.length > 0 && solResults.every((r) => r.pass));
+
+  function buildBody() {
+    const body = { moduleId: form.moduleId, qtype: form.qtype, technical: form.qtype === "code" ? form.technical : false, prompt: form.prompt, explain: form.explain };
+    if (form.qtype === "qcm") {
+      body.options = form.options; body.correct = form.correct;
+      if (form.code.trim()) body.code = form.code;
+    } else if (form.qtype === "code") {
+      body.starter = form.starter; body.tests = parsedTests();
+    } else {
+      body.lines = form.lines;
+    }
+    return body;
+  }
+
+  async function save() {
+    setSaveBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const body = buildBody();
+      if (editingId) {
+        await adminFetch(`/api/v1/admin/questions/${editingId}`, adminKey, { method: "PUT", body: JSON.stringify(body) });
+        setNotice("Question mise à jour.");
+      } else {
+        await adminFetch("/api/v1/admin/questions", adminKey, { method: "POST", body: JSON.stringify(body) });
+        setNotice("Question publiée dans la banque.");
+      }
+      setForm(EMPTY_FORM);
+      setSolution("");
+      setSolResults(null);
+      setEditingId(null);
+      setTab("list");
+      loadList();
+      refreshBank();
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
+  async function toggleStatus(q) {
+    setError("");
+    try {
+      await adminFetch(`/api/v1/admin/questions/${q.id}/status`, adminKey, {
+        method: "PATCH",
+        body: JSON.stringify({ status: q.status === "active" ? "disabled" : "active" }),
+      });
+      loadList();
+      refreshBank();
+    } catch (e) {
+      setError(String(e?.message || e));
+    }
+  }
+
+  function editQuestion(q) {
+    setEditingId(q.id);
+    setForm({
+      moduleId: q.moduleId, qtype: q.qtype, technical: !!q.technical,
+      prompt: q.prompt || "", explain: q.explain || "", code: q.code || "",
+      options: q.options || ["", ""], correct: q.correct ?? 0,
+      starter: q.starter || "",
+      tests: (q.tests || [{ call: "", expect: "" }]).map((t) => ({ call: t.call, expect: JSON.stringify(t.expect) })),
+      lines: q.lines || ["", ""],
+    });
+    setSolution("");
+    setSolResults(null);
+    setTab("form");
+  }
+
+  const inputStyle = { border: `1px solid ${LINE}`, color: TEXT, backgroundColor: "#081B33" };
+  const selectStyle = { border: `1px solid ${LINE}`, color: TEXT, backgroundColor: PANEL_SOFT };
+  const optStyle = { backgroundColor: PANEL_SOFT, color: TEXT };
+  const label = (txt) => <span className="text-[10px] font-mono tracking-widest" style={{ color: TEXT_MUTED }}>{txt}</span>;
+
+  return (
+    <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+        <button onClick={() => setView("map")} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+          <ArrowLeft size={14} /> Retour à la carte
+        </button>
+
+        <div className="flex items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2">
+            <Database size={20} style={{ color: AMBER }} />
+            <h2 className="font-mono font-bold text-xl">Banque de questions</h2>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setTab("list")} className="px-3 py-1.5 rounded-lg font-mono text-xs" style={{ backgroundColor: tab === "list" ? AMBER : PANEL_SOFT, color: tab === "list" ? BG : TEXT, border: `1px solid ${tab === "list" ? AMBER : LINE}` }}>Liste</button>
+            <button onClick={() => { setEditingId(null); setForm(EMPTY_FORM); setSolution(""); setSolResults(null); setTab("form"); }} className="px-3 py-1.5 rounded-lg font-mono text-xs flex items-center gap-1" style={{ backgroundColor: tab === "form" ? AMBER : PANEL_SOFT, color: tab === "form" ? BG : TEXT, border: `1px solid ${tab === "form" ? AMBER : LINE}` }}>
+              <Plus size={12} /> Nouvelle
+            </button>
+          </div>
+        </div>
+
+        {error && <p className="text-xs font-mono mb-3 p-2 rounded" style={{ color: DANGER, backgroundColor: `${DANGER}18`, border: `1px solid ${DANGER}55` }}>{error}</p>}
+        {notice && <p className="text-xs font-mono mb-3 p-2 rounded" style={{ color: SUCCESS, backgroundColor: `${SUCCESS}18`, border: `1px solid ${SUCCESS}55` }}>{notice}</p>}
+
+        {tab === "list" ? (
+          <>
+            <div className="flex gap-2 mb-3">
+              <select value={filterModule} onChange={(e) => setFilterModule(e.target.value)} className="px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={selectStyle}>
+                <option style={optStyle} value="">Tous les modules</option>
+                {MODULES.map((m) => <option style={optStyle} key={m.id} value={m.id}>{m.title}</option>)}
+              </select>
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={selectStyle}>
+                <option style={optStyle} value="">Tous statuts</option>
+                <option style={optStyle} value="active">Actives</option>
+                <option style={optStyle} value="disabled">Désactivées</option>
+              </select>
+              <button onClick={loadList} className="px-2 py-1.5 rounded-md font-mono text-xs" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                <RefreshCw size={12} className={listBusy ? "animate-spin" : ""} />
+              </button>
+            </div>
+
+            {list.length === 0 && !listBusy && (
+              <p className="text-xs font-mono" style={{ color: TEXT_MUTED }}>Aucune question en banque{filterModule || filterStatus ? " pour ces filtres" : ""} — utilise « Nouvelle » pour en publier.</p>
+            )}
+            <div className="flex flex-col gap-2">
+              {list.map((q) => {
+                const mod = MODULES.find((m) => m.id === q.moduleId);
+                return (
+                  <div key={q.id} className="p-3 rounded-lg flex items-start gap-3" style={{ backgroundColor: PANEL, border: `1px solid ${q.status === "active" ? LINE : `${DANGER}66`}`, opacity: q.status === "active" ? 1 : 0.6 }}>
+                    <span className="font-mono text-[9px] px-1.5 py-0.5 rounded shrink-0 mt-0.5" style={{ color: mod?.accent || TEXT_MUTED, border: `1px solid ${mod?.accent || LINE}` }}>
+                      {q.moduleId} · {q.qtype}{q.technical ? " · tech" : ""}
+                    </span>
+                    <p className="flex-1 text-xs leading-snug min-w-0" style={{ color: TEXT }}>{q.prompt}</p>
+                    <div className="flex gap-1 shrink-0">
+                      <button onClick={() => editQuestion(q)} title="Éditer" className="p-1.5 rounded" style={{ border: `1px solid ${LINE}` }}><Pencil size={12} style={{ color: TEXT_MUTED }} /></button>
+                      <button onClick={() => toggleStatus(q)} title={q.status === "active" ? "Désactiver" : "Réactiver"} className="p-1.5 rounded" style={{ border: `1px solid ${LINE}` }}>
+                        {q.status === "active" ? <XCircle size={12} style={{ color: DANGER }} /> : <CheckCircle2 size={12} style={{ color: SUCCESS }} />}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <Frame accent={AMBER} className="p-4">
+            <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm flex flex-col gap-3">
+              {editingId && <p className="text-[10px] font-mono" style={{ color: AMBER }}>ÉDITION — {editingId}</p>}
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1">{label("MODULE")}
+                  <select value={form.moduleId} onChange={(e) => f({ moduleId: e.target.value })} className="px-2 py-2 rounded-md text-sm focus:outline-none" style={selectStyle}>
+                    {MODULES.map((m) => <option style={optStyle} key={m.id} value={m.id}>{m.num} · {m.title}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">{label("TYPE")}
+                  <select value={form.qtype} onChange={(e) => f({ qtype: e.target.value })} className="px-2 py-2 rounded-md text-sm focus:outline-none" style={selectStyle}>
+                    <option style={optStyle} value="qcm">QCM</option>
+                    <option style={optStyle} value="code">Exercice code</option>
+                    <option style={optStyle} value="order">Remise en ordre</option>
+                  </select>
+                </label>
+              </div>
+
+              <label className="flex flex-col gap-1">{label("ÉNONCÉ")}
+                <textarea value={form.prompt} onChange={(e) => f({ prompt: e.target.value })} rows={2} className="px-2 py-2 rounded-md text-sm resize-y focus:outline-none" style={inputStyle} />
+              </label>
+
+              {form.qtype === "qcm" && (
+                <>
+                  <label className="flex flex-col gap-1">{label("EXTRAIT DE CODE AFFICHÉ (OPTIONNEL)")}
+                    <textarea value={form.code} onChange={(e) => f({ code: e.target.value })} rows={3} spellCheck={false} className="px-2 py-2 rounded-md font-mono text-xs resize-y focus:outline-none" style={inputStyle} />
+                  </label>
+                  {label("OPTIONS — coche la bonne réponse")}
+                  {form.options.map((opt, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input type="radio" name="correct" checked={form.correct === i} onChange={() => f({ correct: i })} />
+                      <input value={opt} onChange={(e) => f({ options: form.options.map((o, j) => (j === i ? e.target.value : o)) })} className="flex-1 px-2 py-1.5 rounded-md text-sm focus:outline-none" style={inputStyle} />
+                      {form.options.length > 2 && (
+                        <button onClick={() => f({ options: form.options.filter((_, j) => j !== i), correct: form.correct >= i && form.correct > 0 ? form.correct - 1 : form.correct })} className="p-1.5"><Trash2 size={13} style={{ color: DANGER }} /></button>
+                      )}
+                    </div>
+                  ))}
+                  {form.options.length < 6 && (
+                    <button onClick={() => f({ options: [...form.options, ""] })} className="self-start flex items-center gap-1 text-xs font-mono" style={{ color: TEXT_MUTED }}><Plus size={12} /> Ajouter une option</button>
+                  )}
+                </>
+              )}
+
+              {form.qtype === "code" && (
+                <>
+                  <label className="flex items-center gap-2 text-xs font-mono" style={{ color: TEXT_MUTED }}>
+                    <input type="checkbox" checked={form.technical} onChange={(e) => f({ technical: e.target.checked })} />
+                    Épreuve Technique (hors combat normal)
+                  </label>
+                  <label className="flex flex-col gap-1">{label("CODE DE DÉPART (STARTER)")}
+                    <textarea value={form.starter} onChange={(e) => f({ starter: e.target.value })} rows={4} spellCheck={false} className="px-2 py-2 rounded-md font-mono text-xs resize-y focus:outline-none" style={inputStyle} />
+                  </label>
+                  {label("TESTS — attendu en JSON (4, \"abc\", [2,4]…)")}
+                  {form.tests.map((t, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input value={t.call} placeholder="appel — ex: somme(2, 3)" onChange={(e) => f({ tests: form.tests.map((x, j) => (j === i ? { ...x, call: e.target.value } : x)) })} className="flex-1 px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
+                      <input value={t.expect} placeholder="attendu — ex: 5" onChange={(e) => f({ tests: form.tests.map((x, j) => (j === i ? { ...x, expect: e.target.value } : x)) })} className="w-32 px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
+                      {form.tests.length > 1 && (
+                        <button onClick={() => f({ tests: form.tests.filter((_, j) => j !== i) })} className="p-1.5"><Trash2 size={13} style={{ color: DANGER }} /></button>
+                      )}
+                    </div>
+                  ))}
+                  <button onClick={() => f({ tests: [...form.tests, { call: "", expect: "" }] })} className="self-start flex items-center gap-1 text-xs font-mono" style={{ color: TEXT_MUTED }}><Plus size={12} /> Ajouter un test</button>
+
+                  <div className="p-3 rounded-lg" style={{ backgroundColor: PANEL_SOFT, border: `1px solid ${solutionOk ? SUCCESS : LINE}` }}>
+                    <p className="text-[10px] font-mono tracking-widest mb-2" style={{ color: solutionOk ? SUCCESS : TEXT_MUTED }}>
+                      {solutionOk ? "✓ SOLUTION VALIDÉE — PUBLICATION AUTORISÉE" : "SOLUTION DE RÉFÉRENCE — obligatoire avant publication"}
+                    </p>
+                    <textarea value={solution} onChange={(e) => { setSolution(e.target.value); setSolResults(null); }} rows={4} spellCheck={false} placeholder="Colle ici une solution qui doit passer tous les tests" className="w-full px-2 py-2 rounded-md font-mono text-xs resize-y focus:outline-none mb-2" style={inputStyle} />
+                    <button onClick={testSolution} className="px-3 py-1.5 rounded-lg font-mono text-xs flex items-center gap-1" style={{ backgroundColor: PANEL, color: TEXT, border: `1px solid ${LINE}` }}>
+                      <Play size={12} /> Lancer les tests
+                    </button>
+                    {solResults && (
+                      <div className="mt-2 flex flex-col gap-1">
+                        {solResults.map((r, i) => (
+                          <p key={i} className="text-[11px] font-mono" style={{ color: r.pass ? SUCCESS : DANGER }}>
+                            {r.pass ? "✓" : "✗"} {r.call} → {show(r.got)}{!r.pass && ` (attendu ${show(r.expect)})`}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {form.qtype === "order" && (
+                <>
+                  {label("LIGNES — dans le BON ordre (le jeu les mélangera)")}
+                  {form.lines.map((line, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] w-4" style={{ color: TEXT_MUTED }}>{i + 1}</span>
+                      <input value={line} onChange={(e) => f({ lines: form.lines.map((l, j) => (j === i ? e.target.value : l)) })} className="flex-1 px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
+                      {form.lines.length > 2 && (
+                        <button onClick={() => f({ lines: form.lines.filter((_, j) => j !== i) })} className="p-1.5"><Trash2 size={13} style={{ color: DANGER }} /></button>
+                      )}
+                    </div>
+                  ))}
+                  <button onClick={() => f({ lines: [...form.lines, ""] })} className="self-start flex items-center gap-1 text-xs font-mono" style={{ color: TEXT_MUTED }}><Plus size={12} /> Ajouter une ligne</button>
+                </>
+              )}
+
+              <label className="flex flex-col gap-1">{label("EXPLICATION (AFFICHÉE APRÈS LA RÉPONSE)")}
+                <textarea value={form.explain} onChange={(e) => f({ explain: e.target.value })} rows={2} className="px-2 py-2 rounded-md text-sm resize-y focus:outline-none" style={inputStyle} />
+              </label>
+
+              <button
+                onClick={save}
+                disabled={saveBusy || !form.prompt.trim() || !solutionOk}
+                className="w-full py-2.5 rounded-lg font-mono text-sm font-bold disabled:opacity-40"
+                style={{ backgroundColor: AMBER, color: BG }}
+              >
+                {saveBusy ? "Publication…" : editingId ? "Mettre à jour" : "Publier dans la banque"}
+              </button>
+              {form.qtype === "code" && !solutionOk && (
+                <p className="text-[10px] font-mono text-center" style={{ color: TEXT_MUTED }}>
+                  Publication bloquée tant qu'une solution de référence ne passe pas tous les tests.
+                </p>
+              )}
+            </div>
+          </Frame>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* --- Codex : fragments de lore + hauts faits ------------------------- */
 function CodexView({ ctx }) {
   const { profile, setView, badgeCount } = ctx;
@@ -2047,6 +2391,7 @@ function MapView({ ctx }) {
     aiSettings, setAiSettings, aiReady, aiStatus,
     startDailyChallenge, startSrsSession, startQualificationExam, startTechnicalTrial,
     syncSettings, setSyncSettings, syncStatus, syncBusy, syncNow,
+    adminKey, setAdminKey, bankCount,
   } = ctx;
   const qualified = !!profile.qualification?.passed;
   const chantierUnlocked = qualified && completedCount >= Math.ceil(MODULES.length / 2);
@@ -2426,6 +2771,38 @@ function MapView({ ctx }) {
             </button>
             <div className="mt-2 text-[11px] font-mono" style={{ color: TEXT_MUTED }}>
               {syncStatus}
+            </div>
+          </div>
+        </Frame>
+
+        <Frame accent={AMBER} className="mt-4 p-4">
+          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <Database size={14} style={{ color: AMBER }} />
+              <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>ADMINISTRATION</p>
+            </div>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
+              Réservé au gestionnaire de la banque de questions. La clé est vérifiée par le serveur à chaque action —
+              la renseigner ici ne fait qu'afficher l'interface.
+              {bankCount > 0 && ` Banque actuelle : ${bankCount} question${bankCount > 1 ? "s" : ""} distante${bankCount > 1 ? "s" : ""}.`}
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={adminKey}
+                onChange={(e) => setAdminKey(e.target.value)}
+                placeholder="Clé admin"
+                className="flex-1 px-2 py-2 rounded-md font-mono text-xs bg-transparent focus:outline-none"
+                style={{ border: `1px solid ${LINE}`, color: TEXT }}
+              />
+              <button
+                onClick={() => setView("admin")}
+                disabled={!adminKey}
+                className="px-3 py-2 rounded-lg font-mono text-xs disabled:opacity-40"
+                style={{ backgroundColor: AMBER, color: BG }}
+              >
+                Ouvrir l'admin
+              </button>
             </div>
           </div>
         </Frame>
@@ -2941,9 +3318,29 @@ export default function FullstackQuest() {
 
   // Banque de questions distante : cache d'abord (offline-first), réseau ensuite.
   const [bankCount, setBankCount] = useState(0);
+  const [adminKey, setAdminKey] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try { return window.localStorage.getItem(ADMIN_KEY_STORAGE) || ""; } catch { return ""; }
+  });
+
+  // Rafraîchit la banque depuis le serveur ; réutilisé au montage et après
+  // chaque action admin, pour voir les changements en jeu immédiatement.
+  async function refreshBank() {
+    try {
+      const res = await fetch(`${bankApiBase()}/api/v1/questions`);
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!Array.isArray(data.questions)) return false;
+      setBankCount(applyRemoteBank(data.questions));
+      try {
+        window.localStorage.setItem(BANK_CACHE_KEY, JSON.stringify({ questions: data.questions, fetchedISO: new Date().toISOString() }));
+      } catch { /* stockage plein : la banque restera celle de cette session */ }
+      return true;
+    } catch { return false; /* hors-ligne : cache ou statique */ }
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return;
-    let cancelled = false;
     try {
       const raw = window.localStorage.getItem(BANK_CACHE_KEY);
       if (raw) {
@@ -2951,21 +3348,16 @@ export default function FullstackQuest() {
         setBankCount(applyRemoteBank(cached.questions));
       }
     } catch { /* cache corrompu : on reste sur le statique */ }
-    (async () => {
-      const base = (ENV_AI_SERVER_URL || "http://localhost:8000").replace(/\/$/, "");
-      try {
-        const res = await fetch(`${base}/api/v1/questions`);
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (cancelled || !Array.isArray(data.questions)) return;
-        setBankCount(applyRemoteBank(data.questions));
-        try {
-          window.localStorage.setItem(BANK_CACHE_KEY, JSON.stringify({ questions: data.questions, fetchedISO: new Date().toISOString() }));
-        } catch { /* stockage plein : la banque restera celle de cette session */ }
-      } catch { /* hors-ligne : cache ou statique */ }
-    })();
-    return () => { cancelled = true; };
+    refreshBank();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (adminKey) window.localStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
+      else window.localStorage.removeItem(ADMIN_KEY_STORAGE);
+    } catch { /* ignore */ }
+  }, [adminKey]);
 
   useEffect(() => {
     if (typeof document === "undefined" || document.getElementById("fsq-styles")) return;
@@ -3471,9 +3863,11 @@ export default function FullstackQuest() {
     qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, startQualificationExam, finishQualificationExam,
     techCodeInput, setTechCodeInput, techResults, startTechnicalTrial, runTechnicalTests,
     syncSettings, setSyncSettings, syncStatus, syncBusy, syncNow,
+    adminKey, setAdminKey, refreshBank, bankCount,
   };
 
   /* ------------------------------ ROUTAGE ------------------------------ */
+  if (view === "admin" && adminKey) return <><AdminView ctx={ctx} /><InstallPrompt /></>;
   if (view === "codex") return <><CodexView ctx={ctx} /><InstallPrompt /></>;
   if (view === "intro") return <><IntroView ctx={ctx} /><InstallPrompt /></>;
   if (view === "battle") return <><BattleView ctx={ctx} /><InstallPrompt /></>;
