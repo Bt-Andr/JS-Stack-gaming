@@ -31,7 +31,7 @@ import {
   runCode, shuffleIndices, SFX, FSQ_CSS,
   AdaAvatar, BossAvatar, Frame, Hearts, LoadingScreen, HPBar, ComboMeter,
   DialogueBubble, BadgeChip, MarkdownLite,
-  rng, deriveSeed, sampleWithRng, initSrsItem, updateSrsItem, getDueItems,
+  rng, deriveSeed, sampleWithRng, initSrsItem, updateSrsItem, getDueItems, migrateSrsKeys,
 } from "./harness/src/quest-shared.jsx";
 import { InstallPrompt } from "./harness/src/install-prompt.jsx";
 
@@ -1227,7 +1227,69 @@ function isTechnicalDone(profile, mod) {
   return !!profile.technical?.[mod.id]?.passed;
 }
 
-const TOTAL_QUESTIONS = MODULES.reduce((s, m) => s + getBattleQuestions(m).length, 0);
+/* ---------------------------------------------------------------------- */
+/*  BANQUE DE QUESTIONS DISTANTE (Postgres via ai-server)                  */
+/* ---------------------------------------------------------------------- */
+// Identifiants stables : indispensables pour que l'état SRS survive à
+// l'arrivée de questions distantes (les anciens index `q-N` se décalaient).
+MODULES.forEach((m) => {
+  m.questions.forEach((q, i) => { q.qid = `s-${m.id}-${i}`; });
+  m.staticQuestions = m.questions;
+});
+
+const BANK_CACHE_KEY = "fullstack-quest-remote-bank";
+
+function isUsableRemote(r) {
+  if (!r || !r.id || !r.prompt || !MODULES.some((m) => m.id === r.moduleId)) return false;
+  if (r.qtype === "qcm") return Array.isArray(r.options) && r.options.length >= 2 && Number.isInteger(r.correct) && r.correct >= 0 && r.correct < r.options.length;
+  if (r.qtype === "code") return typeof r.starter === "string" && Array.isArray(r.tests) && r.tests.length > 0;
+  if (r.qtype === "order") return Array.isArray(r.lines) && r.lines.length >= 2;
+  return false;
+}
+
+function mapRemoteQuestion(r) {
+  const q = { qid: `r-${r.id}`, technical: !!r.technical, prompt: r.prompt };
+  if (r.explain) q.explain = r.explain;
+  if (r.qtype === "qcm") {
+    q.options = r.options; q.correct = r.correct;
+    if (r.code) q.code = r.code;
+  } else if (r.qtype === "code") {
+    q.type = "code"; q.starter = r.starter; q.tests = r.tests;
+  } else {
+    q.type = "order"; q.lines = r.lines;
+  }
+  return q;
+}
+
+// Reconstruit chaque module = statiques + distantes triées par id (ordre
+// déterministe : même banque => même pool => même Défi Quotidien, qui est
+// une évaluation commune). Idempotent : repartir de staticQuestions permet
+// de ré-appliquer une banque plus fraîche sans dupliquer.
+function applyRemoteBank(remoteQuestions) {
+  const byModule = new Map();
+  for (const r of remoteQuestions || []) {
+    if (!isUsableRemote(r)) continue;
+    if (!byModule.has(r.moduleId)) byModule.set(r.moduleId, []);
+    byModule.get(r.moduleId).push(r);
+  }
+  let applied = 0;
+  for (const mod of MODULES) {
+    const remotes = (byModule.get(mod.id) || []).sort((a, b) => (a.id < b.id ? -1 : 1)).map(mapRemoteQuestion);
+    mod.questions = [...mod.staticQuestions, ...remotes];
+    applied += remotes.length;
+  }
+  return applied;
+}
+
+// Ordre EXACT de l'ancienne numérotation SRS `q-N` : questions statiques non
+// techniques, dans l'ordre des modules — figé ici avant toute fusion distante.
+const STATIC_BATTLE_QIDS = MODULES.flatMap((m) => m.staticQuestions.filter((q) => !q.technical).map((q) => q.qid));
+
+function withMigratedSrs(profile) {
+  const { srsState, changed } = migrateSrsKeys(profile.srsState, STATIC_BATTLE_QIDS);
+  return changed ? { ...profile, srsState } : profile;
+}
+
 const AI_SETTINGS_KEY = "fullstack-quest-ai-settings";
 const AI_DEFAULT = {
   provider: "ollama",
@@ -2184,7 +2246,7 @@ function MapView({ ctx }) {
         </div>
 
         <div className="mt-10 pt-4 border-t font-mono text-[10px] tracking-widest text-center" style={{ borderColor: LINE, color: TEXT_MUTED }}>
-          {TOTAL_QUESTIONS} DÉFIS · 9 BOSS · SURVIS À CHAQUE DUEL POUR PURIFIER LA STACK
+          {MODULES.reduce((s, m) => s + getBattleQuestions(m).length, 0)} DÉFIS · 9 BOSS · SURVIS À CHAQUE DUEL POUR PURIFIER LA STACK
         </div>
 
         <div className="mt-6 text-center">
@@ -2761,6 +2823,9 @@ function ResultView({ ctx }) {
 /* ====================================================================== */
 /*  COMPOSANT PRINCIPAL — état, logique de combat, routage                */
 /* ====================================================================== */
+// Exports nommés pour les tests (le harness n'importe que le défaut).
+export { MODULES, applyRemoteBank, isUsableRemote, STATIC_BATTLE_QIDS, collectAllQuestions, getBattleQuestions };
+
 export default function FullstackQuest() {
   const [profile, setProfile] = useState(null);
   const [soundOn, setSoundOn] = useState(true);
@@ -2870,8 +2935,36 @@ export default function FullstackQuest() {
         }
       }
 
-      setProfile(local || { ...FRESH });
+      setProfile(withMigratedSrs(local || { ...FRESH }));
     })();
+  }, []);
+
+  // Banque de questions distante : cache d'abord (offline-first), réseau ensuite.
+  const [bankCount, setBankCount] = useState(0);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    try {
+      const raw = window.localStorage.getItem(BANK_CACHE_KEY);
+      if (raw) {
+        const cached = JSON.parse(raw);
+        setBankCount(applyRemoteBank(cached.questions));
+      }
+    } catch { /* cache corrompu : on reste sur le statique */ }
+    (async () => {
+      const base = (ENV_AI_SERVER_URL || "http://localhost:8000").replace(/\/$/, "");
+      try {
+        const res = await fetch(`${base}/api/v1/questions`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled || !Array.isArray(data.questions)) return;
+        setBankCount(applyRemoteBank(data.questions));
+        try {
+          window.localStorage.setItem(BANK_CACHE_KEY, JSON.stringify({ questions: data.questions, fetchedISO: new Date().toISOString() }));
+        } catch { /* stockage plein : la banque restera celle de cette session */ }
+      } catch { /* hors-ligne : cache ou statique */ }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -2935,7 +3028,7 @@ export default function FullstackQuest() {
       const localTime = profile?.updatedISO ? new Date(profile.updatedISO).getTime() : 0;
       const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
       if (remote?.profile && remoteTime > localTime) {
-        await persist({ ...FRESH, ...remote.profile });
+        await persist(withMigratedSrs({ ...FRESH, ...remote.profile }));
         setSyncStatus(`Version distante plus récente adoptée · compte "${syncSettings.account}"`);
       } else {
         await syncProfilePut(syncSettings, profile);
@@ -3002,29 +3095,27 @@ export default function FullstackQuest() {
 
   function startSrsSession() {
     const allQ = collectAllQuestions(MODULES);
+    const byQid = new Map(allQ.map((q) => [q.qid, q]));
     const withQuestions = (dueList) => dueList
       .map((d) => {
-        const idx = Number(d.qId.slice(2));
-        const q = allQ[idx];
+        const q = byQid.get(d.qId);
         return q ? { ...d, ...q } : null;
       })
       .filter(Boolean);
-    const due = getDueItems(profile.srsState || {});
+    const srsState = profile.srsState || {};
+    // Les questions encore inconnues du SRS (nouveaux ajouts statiques ou
+    // banque distante) sont enrôlées à chaque lancement, pas seulement au
+    // tout premier — la banque grandit en continu désormais.
+    const missing = allQ.filter((q) => !srsState[q.qid]);
+    let effectiveState = srsState;
+    if (missing.length > 0) {
+      effectiveState = { ...srsState };
+      missing.forEach((q) => { effectiveState[q.qid] = initSrsItem(); });
+      persist({ ...profile, srsState: effectiveState });
+    }
+    const due = getDueItems(effectiveState);
     if (due.length === 0) {
-      // Initialize SRS for all questions if none exist
-      if (Object.keys(profile.srsState || {}).length === 0) {
-        const newSrsState = {};
-        allQ.forEach((q, idx) => {
-          newSrsState[`q-${idx}`] = initSrsItem();
-        });
-        persist({ ...profile, srsState: newSrsState });
-        const initDue = getDueItems(newSrsState);
-        setSrsSessionItems(withQuestions(initDue).slice(0, 10)); // Max 10 per session
-        setSrsSessionIdx(0);
-        setView("srs");
-      } else {
-        setAda("Aucune révision à faire pour l'instant. Tu progresses bien!", "proud");
-      }
+      setAda("Aucune révision à faire pour l'instant. Tu progresses bien!", "proud");
       return;
     }
     setSrsSessionItems(withQuestions(due).slice(0, 20)); // Max 20 due items per session
@@ -3288,10 +3379,10 @@ export default function FullstackQuest() {
     if (!importText.trim()) return;
     try {
       const parsed = JSON.parse(importText);
-      const next = {
+      const next = withMigratedSrs({
         ...FRESH,
         ...(parsed && typeof parsed === "object" ? parsed : {}),
-      };
+      });
       await persist(next);
       setImportText("");
       setView("map");

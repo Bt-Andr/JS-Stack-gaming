@@ -416,6 +416,27 @@ export function getDueItems(srsState, now = new Date()) {
     .sort((a, b) => new Date(a.nextDueISO) - new Date(b.nextDueISO));
 }
 
+// Migration des anciens états SRS : les clés historiques `q-<index>` étaient
+// des positions dans la liste globale des questions statiques — l'arrivée de
+// la banque distante décale ces positions, donc on les convertit une fois
+// vers des identifiants stables. `orderedQids` doit être l'ordre EXACT de
+// l'ancienne liste (questions statiques non techniques, ordre des modules).
+export function migrateSrsKeys(srsState, orderedQids) {
+  const out = {};
+  let changed = false;
+  for (const [key, item] of Object.entries(srsState || {})) {
+    const m = /^q-(\d+)$/.exec(key);
+    if (m) {
+      changed = true;
+      const qid = orderedQids[Number(m[1])];
+      if (qid && !out[qid]) out[qid] = item;
+    } else {
+      out[key] = item;
+    }
+  }
+  return { srsState: out, changed };
+}
+
 // Rendu markdown léger pour les indices IA (gras, code, italique) en vrais
 // éléments React plutôt qu'en texte brut. Ça règle deux choses à la fois :
 // le formatage s'affiche correctement, et un copier-coller du texte rendu ne
