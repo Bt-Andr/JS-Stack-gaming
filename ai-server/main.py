@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -64,6 +65,17 @@ if ALLOWED_ORIGINS == ["*"]:
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL", "").strip().rstrip("/")
 UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "").strip()
 ACCOUNT_RE = re.compile(r"^[a-zA-Z0-9_-]{3,32}$")
+
+# Postgres (Neon) — central question bank, authored by the admin via the in-app
+# admin view. Distinct key from AI_API_KEY: leaking the public key must never
+# grant write access to the bank.
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
+
+try:
+    import asyncpg
+except ImportError:  # AI-only deployments can run without the DB extra
+    asyncpg = None
 
 
 # Enforced server-side (not just trusted from the frontend) so it applies to
@@ -262,6 +274,252 @@ async def put_profile(account: str, body: ProfilePut, x_profile_pin: Optional[st
     payload = json.dumps({"profile": body.profile, "updatedISO": datetime.now(timezone.utc).isoformat()})
     await _redis_set(_profile_key(account), payload)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Question bank (Postgres/Neon) — admin-authored, served to every player.
+# ---------------------------------------------------------------------------
+
+VALID_MODULES = {"js-fond", "js-avance", "async", "ts", "react", "next", "express", "vite", "boss"}
+VALID_QTYPES = {"qcm", "code", "order"}
+VALID_STATUSES = {"active", "disabled"}
+
+QUESTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS questions (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  module_id     text NOT NULL,
+  qtype         text NOT NULL,
+  payload       jsonb NOT NULL,
+  technical     boolean NOT NULL DEFAULT false,
+  status        text NOT NULL DEFAULT 'active',
+  content_hash  text UNIQUE NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_questions_module_status ON questions (module_id, status);
+"""
+
+_pool = None
+
+
+def _clean_dsn(dsn: str) -> str:
+    # asyncpg rejects Neon's channel_binding DSN parameter — rebuild the query
+    # string without it (a plain regex breaks when it isn't the last parameter).
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    parts = urlsplit(dsn)
+    query = urlencode([(k, v) for k, v in parse_qsl(parts.query) if k != "channel_binding"])
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
+async def _get_pool():
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(_clean_dsn(DATABASE_URL), min_size=1, max_size=5)
+        async with _pool.acquire() as conn:
+            await conn.execute(QUESTIONS_SCHEMA)
+    return _pool
+
+
+def _require_db() -> None:
+    if not DATABASE_URL or asyncpg is None:
+        raise HTTPException(status_code=503, detail="La banque de questions n'est pas configurée sur ce serveur (DATABASE_URL manquante ou asyncpg absent).")
+
+
+def _require_admin(x_admin_key: Optional[str]) -> None:
+    if not ADMIN_API_KEY:
+        raise HTTPException(status_code=503, detail="ADMIN_API_KEY n'est pas configurée sur ce serveur.")
+    if not x_admin_key or x_admin_key != ADMIN_API_KEY:
+        raise HTTPException(status_code=401, detail="Clé admin invalide ou manquante.")
+
+
+def _require_uuid(qid: str) -> None:
+    try:
+        uuid.UUID(qid)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Question introuvable (id invalide).")
+
+
+class QuestionIn(BaseModel):
+    moduleId: str
+    qtype: str = "qcm"
+    technical: bool = False
+    prompt: str = ""
+    explain: Optional[str] = None
+    code: Optional[str] = None          # extrait de code affiché (QCM)
+    options: Optional[list] = None      # qcm
+    correct: Optional[int] = None       # qcm
+    starter: Optional[str] = None       # code
+    tests: Optional[list] = None        # code: [{call, expect}]
+    lines: Optional[list] = None        # order
+
+
+def _validate_question(q: QuestionIn) -> Dict[str, Any]:
+    """Validate per-type and return the exact payload dict to store (extras stripped)."""
+    def bad(msg: str):
+        raise HTTPException(status_code=400, detail=msg)
+
+    if q.moduleId not in VALID_MODULES:
+        bad(f"moduleId invalide: {q.moduleId!r} (attendu: {', '.join(sorted(VALID_MODULES))})")
+    if q.qtype not in VALID_QTYPES:
+        bad(f"qtype invalide: {q.qtype!r} (attendu: qcm, code ou order)")
+    prompt = (q.prompt or "").strip()
+    if not prompt:
+        bad("prompt est requis.")
+
+    payload: Dict[str, Any] = {"prompt": prompt}
+    if q.explain and q.explain.strip():
+        payload["explain"] = q.explain.strip()
+
+    if q.qtype == "qcm":
+        options = [str(o).strip() for o in (q.options or [])]
+        if len(options) < 2 or len(options) > 6 or any(not o for o in options):
+            bad("Un QCM exige entre 2 et 6 options non vides.")
+        if q.correct is None or not (0 <= q.correct < len(options)):
+            bad(f"correct doit être un index valide entre 0 et {len(options) - 1}.")
+        payload["options"] = options
+        payload["correct"] = q.correct
+        if q.code and q.code.strip():
+            payload["code"] = q.code
+    elif q.qtype == "code":
+        if not q.starter or not q.starter.strip():
+            bad("Un exercice code exige un champ starter.")
+        tests = q.tests or []
+        if not tests or any(not isinstance(t, dict) or not str(t.get("call", "")).strip() or "expect" not in t for t in tests):
+            bad("Un exercice code exige au moins un test de forme {call, expect}.")
+        payload["type"] = "code"
+        payload["starter"] = q.starter
+        payload["tests"] = [{"call": str(t["call"]), "expect": t["expect"]} for t in tests]
+    else:  # order
+        lines = [str(l) for l in (q.lines or [])]
+        if len(lines) < 2 or any(not l.strip() for l in lines):
+            bad("Un exercice d'ordre exige au moins 2 lignes non vides.")
+        payload["type"] = "order"
+        payload["lines"] = lines
+
+    return payload
+
+
+def _content_hash(module_id: str, qtype: str, prompt: str) -> str:
+    normalized = " ".join(prompt.lower().split())
+    return hashlib.sha256(f"{module_id}|{qtype}|{normalized}".encode("utf-8")).hexdigest()
+
+
+def _row_to_question(row) -> Dict[str, Any]:
+    payload = row["payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return {
+        "id": str(row["id"]),
+        "moduleId": row["module_id"],
+        "qtype": row["qtype"],
+        "technical": row["technical"],
+        "status": row["status"],
+        "createdAt": row["created_at"].isoformat(),
+        "updatedAt": row["updated_at"].isoformat(),
+        **payload,
+    }
+
+
+async def db_list_questions(module: Optional[str], status: Optional[str], qtype: Optional[str]) -> list:
+    pool = await _get_pool()
+    clauses, args = [], []
+    for field, value in (("module_id", module), ("status", status), ("qtype", qtype)):
+        if value:
+            args.append(value)
+            clauses.append(f"{field} = ${len(args)}")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(f"SELECT * FROM questions {where} ORDER BY module_id, created_at")
+    return [_row_to_question(r) for r in rows]
+
+
+async def db_insert_question(module_id: str, qtype: str, technical: bool, payload: Dict[str, Any]) -> Dict[str, Any]:
+    pool = await _get_pool()
+    chash = _content_hash(module_id, qtype, payload["prompt"])
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                "INSERT INTO questions (module_id, qtype, technical, payload, content_hash) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+                module_id, qtype, technical, json.dumps(payload), chash,
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(status_code=409, detail="Une question quasi identique (même module, type et énoncé) existe déjà.")
+    return _row_to_question(row)
+
+
+async def db_update_question(qid: str, module_id: str, qtype: str, technical: bool, payload: Dict[str, Any]) -> Dict[str, Any]:
+    pool = await _get_pool()
+    chash = _content_hash(module_id, qtype, payload["prompt"])
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                "UPDATE questions SET module_id=$2, qtype=$3, technical=$4, payload=$5, content_hash=$6, updated_at=now() WHERE id=$1 RETURNING *",
+                qid, module_id, qtype, technical, json.dumps(payload), chash,
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(status_code=409, detail="Une autre question quasi identique existe déjà.")
+    if row is None:
+        raise HTTPException(status_code=404, detail="Question introuvable.")
+    return _row_to_question(row)
+
+
+async def db_set_status(qid: str, status: str) -> Dict[str, Any]:
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("UPDATE questions SET status=$2, updated_at=now() WHERE id=$1 RETURNING *", qid, status)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Question introuvable.")
+    return _row_to_question(row)
+
+
+@app.get("/api/v1/questions")
+async def public_questions(module: Optional[str] = None):
+    """Banque servie aux joueurs : questions actives uniquement, lecture publique
+    (le contenu part de toute façon dans le bundle de chaque joueur)."""
+    _require_db()
+    questions = await db_list_questions(module, "active", None)
+    for q in questions:
+        q.pop("status", None)
+    return {"questions": questions}
+
+
+@app.get("/api/v1/admin/questions")
+async def admin_list(module: Optional[str] = None, status: Optional[str] = None, qtype: Optional[str] = None,
+                     x_admin_key: Optional[str] = Header(default=None)):
+    _require_admin(x_admin_key)
+    _require_db()
+    return {"questions": await db_list_questions(module, status, qtype)}
+
+
+@app.post("/api/v1/admin/questions", status_code=201)
+async def admin_create(q: QuestionIn, x_admin_key: Optional[str] = Header(default=None)):
+    _require_admin(x_admin_key)
+    _require_db()
+    payload = _validate_question(q)
+    return await db_insert_question(q.moduleId, q.qtype, q.technical, payload)
+
+
+@app.put("/api/v1/admin/questions/{qid}")
+async def admin_update(qid: str, q: QuestionIn, x_admin_key: Optional[str] = Header(default=None)):
+    _require_admin(x_admin_key)
+    _require_db()
+    _require_uuid(qid)
+    payload = _validate_question(q)
+    return await db_update_question(qid, q.moduleId, q.qtype, q.technical, payload)
+
+
+class StatusIn(BaseModel):
+    status: str
+
+
+@app.patch("/api/v1/admin/questions/{qid}/status")
+async def admin_set_status(qid: str, body: StatusIn, x_admin_key: Optional[str] = Header(default=None)):
+    _require_admin(x_admin_key)
+    _require_db()
+    _require_uuid(qid)
+    if body.status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail="status doit être 'active' ou 'disabled'.")
+    return await db_set_status(qid, body.status)
 
 
 MAX_PROMPT_CHARS = 4000

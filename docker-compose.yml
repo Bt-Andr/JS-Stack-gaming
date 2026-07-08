@@ -12,6 +12,9 @@ services:
       # get these from an Upstash Redis database (free tier) at upstash.com.
       - UPSTASH_REDIS_REST_URL=${UPSTASH_REDIS_REST_URL:-}
       - UPSTASH_REDIS_REST_TOKEN=${UPSTASH_REDIS_REST_TOKEN:-}
+      # Question bank (optional): Neon Postgres URL + admin key for the in-app admin view.
+      - DATABASE_URL=${DATABASE_URL:-}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
 
   ai-server-ollama:
     image: ollama/ollama:latest
