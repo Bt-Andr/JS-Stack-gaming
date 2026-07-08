@@ -86,28 +86,50 @@ async def _generate_ollama(prompt: str, max_tokens: int) -> str:
     return data.get("response", "")
 
 
-async def _generate_openai_compatible(prompt: str, max_tokens: int) -> str:
-    upstream = AI_UPSTREAM_URL
-    if not upstream:
-        raise HTTPException(status_code=500, detail="AI_UPSTREAM_URL is required for openai_compatible mode")
+async def _call_chat_completions(base_url: str, api_key: str, model: str, prompt: str, max_tokens: int) -> str:
     payload = {
-        "model": AI_MODEL or "local-model",
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": 0.4,
     }
     headers = {"Content-Type": "application/json"}
-    api_key = os.getenv("AI_UPSTREAM_API_KEY", "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     async with httpx.AsyncClient(timeout=120) as client:
-        res = await client.post(f"{upstream}/chat/completions", json=payload, headers=headers)
+        res = await client.post(f"{base_url.rstrip('/')}/chat/completions", json=payload, headers=headers)
         res.raise_for_status()
         data = res.json()
     choices = data.get("choices") or []
     if not choices:
         return ""
     return choices[0].get("message", {}).get("content", "") or ""
+
+
+async def _generate_openai_compatible(prompt: str, max_tokens: int) -> str:
+    upstream = AI_UPSTREAM_URL
+    if not upstream:
+        raise HTTPException(status_code=500, detail="AI_UPSTREAM_URL is required for openai_compatible mode")
+    api_key = os.getenv("AI_UPSTREAM_API_KEY", "").strip()
+    return await _call_chat_completions(upstream, api_key, AI_MODEL or "local-model", prompt, max_tokens)
+
+
+async def _generate_openai(prompt: str, max_tokens: int) -> str:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required for provider=openai")
+    return await _call_chat_completions("https://api.openai.com/v1", api_key, AI_MODEL or "gpt-4o-mini", prompt, max_tokens)
+
+
+async def _generate_gemini(prompt: str, max_tokens: int) -> str:
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is required for provider=gemini")
+    # Gemini exposes an OpenAI-compatible endpoint, so the same chat/completions
+    # call shape works — no separate SDK or payload format needed.
+    return await _call_chat_completions(
+        "https://generativelanguage.googleapis.com/v1beta/openai", api_key, AI_MODEL or "gemini-2.0-flash", prompt, max_tokens
+    )
 
 
 def _redis_configured() -> bool:
@@ -206,7 +228,11 @@ async def generate(req: GenerateRequest, x_api_key: Optional[str] = Header(defau
     max_tokens = req.max_tokens or 256
     if provider == "ollama":
         answer = await _generate_ollama(req.prompt, max_tokens)
-    elif provider in {"openai_compatible", "openai-compatible", "openai"}:
+    elif provider == "openai":
+        answer = await _generate_openai(req.prompt, max_tokens)
+    elif provider == "gemini":
+        answer = await _generate_gemini(req.prompt, max_tokens)
+    elif provider in {"openai_compatible", "openai-compatible"}:
         answer = await _generate_openai_compatible(req.prompt, max_tokens)
     else:
         answer = await _generate_stub(req.prompt, max_tokens)
