@@ -429,7 +429,7 @@ async def db_list_questions(module: Optional[str], status: Optional[str], qtype:
             clauses.append(f"{field} = ${len(args)}")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     async with pool.acquire() as conn:
-        rows = await conn.fetch(f"SELECT * FROM questions {where} ORDER BY module_id, created_at")
+        rows = await conn.fetch(f"SELECT * FROM questions {where} ORDER BY module_id, created_at", *args)
     return [_row_to_question(r) for r in rows]
 
 
