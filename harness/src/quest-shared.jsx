@@ -415,3 +415,50 @@ export function getDueItems(srsState, now = new Date()) {
     .map(([qId, item]) => ({ qId, ...item }))
     .sort((a, b) => new Date(a.nextDueISO) - new Date(b.nextDueISO));
 }
+
+// Rendu markdown léger pour les indices IA (gras, code, italique) en vrais
+// éléments React plutôt qu'en texte brut. Ça règle deux choses à la fois :
+// le formatage s'affiche correctement, et un copier-coller du texte rendu ne
+// récupère jamais les marqueurs, puisqu'ils n'existent plus dans le DOM une
+// fois consommés par le parseur.
+function renderInlineMarkdown(line, keyPrefix) {
+  const tokenRe = /(\*\*.+?\*\*|`.+?`|\*.+?\*|_.+?_)/g;
+  const nodes = [];
+  let lastIndex = 0;
+  let match;
+  let i = 0;
+  while ((match = tokenRe.exec(line)) !== null) {
+    if (match.index > lastIndex) nodes.push(line.slice(lastIndex, match.index));
+    const token = match[0];
+    const k = `${keyPrefix}-${i++}`;
+    if (token.startsWith("**")) {
+      nodes.push(<strong key={k}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("`")) {
+      nodes.push(<code key={k} style={{ background: "#081B33", padding: "1px 5px", borderRadius: 4, fontSize: "0.92em" }}>{token.slice(1, -1)}</code>);
+    } else {
+      nodes.push(<em key={k}>{token.slice(1, -1)}</em>);
+    }
+    lastIndex = tokenRe.lastIndex;
+  }
+  if (lastIndex < line.length) nodes.push(line.slice(lastIndex));
+  return nodes;
+}
+
+export function MarkdownLite({ text, className, style }) {
+  if (!text) return null;
+  const paragraphs = String(text).split(/\n{2,}/);
+  return (
+    <div className={className} style={style}>
+      {paragraphs.map((para, pi) => (
+        <p key={pi} style={{ margin: pi === 0 ? 0 : "0.6em 0 0" }}>
+          {para.split("\n").map((line, li, arr) => (
+            <React.Fragment key={li}>
+              {renderInlineMarkdown(line, `${pi}-${li}`)}
+              {li < arr.length - 1 ? <br /> : null}
+            </React.Fragment>
+          ))}
+        </p>
+      ))}
+    </div>
+  );
+}

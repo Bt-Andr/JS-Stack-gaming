@@ -30,7 +30,7 @@ import {
   STORAGE_KEY, BADGES, ADA_LINES, pick, getLevelInfo, deepEqual, show,
   runCode, shuffleIndices, SFX, FSQ_CSS,
   AdaAvatar, BossAvatar, Frame, Hearts, LoadingScreen, HPBar, ComboMeter,
-  DialogueBubble, BadgeChip,
+  DialogueBubble, BadgeChip, MarkdownLite,
   rng, deriveSeed, sampleWithRng, initSrsItem, updateSrsItem, getDueItems,
 } from "./harness/src/quest-shared.jsx";
 import { InstallPrompt } from "./harness/src/install-prompt.jsx";
@@ -1903,7 +1903,13 @@ function ChantierView({ ctx }) {
                         </button>
                       </div>
 
-                      {hint?.text && <p className="text-xs leading-relaxed p-2 rounded" style={{ backgroundColor: PANEL_SOFT, color: TEXT }}>{hint.text}</p>}
+                      {hint?.text && (
+                        <MarkdownLite
+                          text={hint.text}
+                          className="text-xs leading-relaxed p-2 rounded"
+                          style={{ backgroundColor: PANEL_SOFT, color: TEXT, maxHeight: 220, overflowY: "auto" }}
+                        />
+                      )}
                       {hint?.error && <p className="text-xs leading-relaxed p-2 rounded" style={{ backgroundColor: PANEL_SOFT, color: DANGER }}>{hint.error}</p>}
                       {!hint?.text && !hint?.error && (
                         <p className="text-xs italic" style={{ color: TEXT_MUTED }}>Indice de secours : {m.hint}</p>
@@ -2489,7 +2495,13 @@ function BattleView({ ctx }) {
               Indice progressif, sans donner la solution brute. Le modèle tourne sur ta machine.
             </p>
             {aiError && <p className="text-xs mb-2" style={{ color: DANGER }}>{aiError}</p>}
-            {aiHint && <p className="text-xs leading-relaxed" style={{ color: TEXT }}>{aiHint}</p>}
+            {aiHint && (
+              <MarkdownLite
+                text={aiHint}
+                className="text-xs leading-relaxed pr-1"
+                style={{ color: TEXT, maxHeight: 180, overflowY: "auto" }}
+              />
+            )}
             {aiHint && !aiBusy && (
               <button onClick={clearAiHint} className="mt-2 text-[11px] font-mono underline" style={{ color: TEXT_MUTED }}>Effacer l'indice</button>
             )}

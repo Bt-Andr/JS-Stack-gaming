@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { aiGenerate } from "./quest-shared.jsx";
+import { aiGenerate, MarkdownLite } from "./quest-shared.jsx";
 
 export default function AiTest() {
   const [open, setOpen] = useState(false);
@@ -72,8 +72,14 @@ export default function AiTest() {
             Clear
           </button>
         </div>
-        {result && (
-          <pre style={{ whiteSpace: "pre-wrap", marginTop: 8, background: "#061d33", color: result.error ? "#E8584B" : "#EAF2FA", padding: 8, borderRadius: 6 }}>{result.error ? `Error: ${result.text}` : result.text}</pre>
+        {result && result.error && (
+          <pre style={{ whiteSpace: "pre-wrap", marginTop: 8, background: "#061d33", color: "#E8584B", padding: 8, borderRadius: 6, maxHeight: 200, overflowY: "auto" }}>{`Error: ${result.text}`}</pre>
+        )}
+        {result && !result.error && (
+          <MarkdownLite
+            text={result.text}
+            style={{ marginTop: 8, background: "#061d33", color: "#EAF2FA", padding: 8, borderRadius: 6, maxHeight: 200, overflowY: "auto" }}
+          />
         )}
       </div>
     </div>
