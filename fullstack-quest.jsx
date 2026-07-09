@@ -23,7 +23,8 @@ import {
   Lock, Check, ChevronRight, ArrowLeft, RotateCcw, Skull,
   Volume2, VolumeX, BookOpen, MessageSquareText,
   Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle, Hammer,
-  GraduationCap, Wrench, RefreshCw, Cloud, Plus, Trash2, Pencil, Database, Swords
+  GraduationCap, Wrench, RefreshCw, Cloud, Plus, Trash2, Pencil, Database, Swords,
+  Menu, X, Download, Upload, Copy
 } from "lucide-react";
 import {
   BG, PANEL, PANEL_SOFT, LINE, TEXT, TEXT_MUTED, AMBER, SUCCESS, DANGER,
@@ -1291,15 +1292,24 @@ function withMigratedSrs(profile) {
 }
 
 const AI_SETTINGS_KEY = "fullstack-quest-ai-settings";
-const AI_DEFAULT = {
-  provider: "ollama",
-  endpoint: "http://localhost:11434",
-  model: "llama3.2",
-  apiKey: "",
-};
+// URL de ton ai-server déployé, injectée au build (Vercel: variable VITE_AI_SERVER_URL).
+const ENV_AI_SERVER_URL =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_AI_SERVER_URL) || "";
+// L'utilisateur ne choisit pas son moteur IA : si l'app a été buildée avec un
+// serveur FSQ, il est utilisé d'office ; sinon repli sur un Ollama local.
+// La console admin (#admin) permet de changer tout ça.
+const AI_DEFAULT = ENV_AI_SERVER_URL
+  ? { provider: "fsq-server", endpoint: ENV_AI_SERVER_URL, model: "", apiKey: "" }
+  : { provider: "ollama", endpoint: "http://localhost:11434", model: "llama3.2", apiKey: "" };
 const SYNC_SETTINGS_KEY = "fullstack-quest-sync-settings";
 const SYNC_DEFAULT = { serverUrl: "", account: "", pin: "" };
 const ADMIN_KEY_STORAGE = "fullstack-quest-admin-key";
+
+// Le serveur de synchro n'est jamais demandé à l'utilisateur : celui du build,
+// sauf override posé dans la console admin.
+function withSyncServer(s) {
+  return { ...(s || {}), serverUrl: String(s?.serverUrl || ENV_AI_SERVER_URL || "").trim() };
+}
 
 function bankApiBase() {
   return (ENV_AI_SERVER_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -1314,10 +1324,6 @@ async function adminFetch(path, adminKey, opts = {}) {
   if (!res.ok) throw new Error(body?.detail || `HTTP ${res.status}`);
   return body;
 }
-
-// URL de ton ai-server déployé, injectée au build (Vercel: variable VITE_AI_SERVER_URL).
-const ENV_AI_SERVER_URL =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_AI_SERVER_URL) || "";
 
 const CUSTOM_ENDPOINT = "__custom__";
 
@@ -2017,8 +2023,12 @@ const EMPTY_FORM = {
 };
 
 function AdminView({ ctx }) {
-  const { setView, adminKey, refreshBank } = ctx;
-  const [tab, setTab] = useState("list"); // list | form
+  const {
+    adminKey, setAdminKey, refreshBank, exitAdmin, bankCount,
+    aiSettings, setAiSettings, aiReady, aiStatus,
+    syncSettings, setSyncSettings,
+  } = ctx;
+  const [tab, setTab] = useState("list"); // list | form | settings
   const [editingId, setEditingId] = useState(null);
   const [list, setList] = useState([]);
   const [listBusy, setListBusy] = useState(false);
@@ -2148,19 +2158,22 @@ function AdminView({ ctx }) {
   return (
     <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
       <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
-        <button onClick={() => setView("map")} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+        <button onClick={exitAdmin} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
           <ArrowLeft size={14} /> Retour à la carte
         </button>
 
         <div className="flex items-center justify-between gap-2 mb-4">
           <div className="flex items-center gap-2">
             <Database size={20} style={{ color: AMBER }} />
-            <h2 className="font-mono font-bold text-xl">Banque de questions</h2>
+            <h2 className="font-mono font-bold text-xl">Console d'administration</h2>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setTab("list")} className="px-3 py-1.5 rounded-lg font-mono text-xs" style={{ backgroundColor: tab === "list" ? AMBER : PANEL_SOFT, color: tab === "list" ? BG : TEXT, border: `1px solid ${tab === "list" ? AMBER : LINE}` }}>Liste</button>
             <button onClick={() => { setEditingId(null); setForm(EMPTY_FORM); setSolution(""); setSolResults(null); setTab("form"); }} className="px-3 py-1.5 rounded-lg font-mono text-xs flex items-center gap-1" style={{ backgroundColor: tab === "form" ? AMBER : PANEL_SOFT, color: tab === "form" ? BG : TEXT, border: `1px solid ${tab === "form" ? AMBER : LINE}` }}>
               <Plus size={12} /> Nouvelle
+            </button>
+            <button onClick={() => setTab("settings")} className="px-3 py-1.5 rounded-lg font-mono text-xs flex items-center gap-1" style={{ backgroundColor: tab === "settings" ? AMBER : PANEL_SOFT, color: tab === "settings" ? BG : TEXT, border: `1px solid ${tab === "settings" ? AMBER : LINE}` }}>
+              <Wrench size={12} /> Réglages
             </button>
           </div>
         </div>
@@ -2208,6 +2221,138 @@ function AdminView({ ctx }) {
               })}
             </div>
           </>
+        ) : tab === "settings" ? (
+          <div className="flex flex-col gap-4">
+            <Frame accent="#8ECAE6" className="p-4">
+              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <MessageSquareText size={14} style={{ color: "#8ECAE6" }} />
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>MOTEUR IA (INDICES)</p>
+                </div>
+                <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
+                  Moteur utilisé par le coach pour générer les indices : serveur FSQ déployé, serveur local (Ollama),
+                  ou serveur OpenAI-compatible. Ce réglage vaut pour cet appareil.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                    Moteur
+                    <select
+                      value={aiSettings.provider}
+                      onChange={(e) => {
+                        const provider = e.target.value;
+                        const presets = getEndpointPresets(provider);
+                        setAiSettings((s) => ({ ...s, provider, endpoint: presets[0]?.value || s.endpoint }));
+                      }}
+                      className="px-2 py-2 rounded-md focus:outline-none"
+                      style={{ border: `1px solid ${LINE}`, color: TEXT, backgroundColor: PANEL_SOFT }}
+                    >
+                      <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value="ollama">Ollama</option>
+                      <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value="openai">OpenAI-compatible</option>
+                      <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value="fsq-server">Serveur FSQ (ai-server / Render)</option>
+                    </select>
+                  </label>
+                  {(() => {
+                    const presets = getEndpointPresets(aiSettings.provider);
+                    const matched = presets.find((p) => p.value === aiSettings.endpoint);
+                    const isCustom = !matched;
+                    return (
+                      <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                        Endpoint
+                        <select
+                          value={isCustom ? CUSTOM_ENDPOINT : matched.value}
+                          onChange={(e) => {
+                            if (e.target.value === CUSTOM_ENDPOINT) return;
+                            setAiSettings((s) => ({ ...s, endpoint: e.target.value }));
+                          }}
+                          className="px-2 py-2 rounded-md focus:outline-none"
+                          style={{ border: `1px solid ${LINE}`, color: TEXT, backgroundColor: PANEL_SOFT }}
+                        >
+                          {presets.map((p) => (
+                            <option key={p.value} style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value={p.value}>{p.label}</option>
+                          ))}
+                          <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value={CUSTOM_ENDPOINT}>Personnalisé…</option>
+                        </select>
+                        {isCustom && (
+                          <input
+                            value={aiSettings.endpoint}
+                            onChange={(e) => setAiSettings((s) => ({ ...s, endpoint: e.target.value }))}
+                            placeholder="https://..."
+                            className="mt-1 px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                            style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                          />
+                        )}
+                      </label>
+                    );
+                  })()}
+                  <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                    Modèle
+                    <input
+                      value={aiSettings.model}
+                      onChange={(e) => setAiSettings((s) => ({ ...s, model: e.target.value }))}
+                      className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                      style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                    />
+                  </label>
+                  {aiSettings.provider === "fsq-server" && (
+                    <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                      Clé API (si AI_API_KEY est définie côté serveur)
+                      <input
+                        type="password"
+                        value={aiSettings.apiKey || ""}
+                        onChange={(e) => setAiSettings((s) => ({ ...s, apiKey: e.target.value }))}
+                        className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                        style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                      />
+                    </label>
+                  )}
+                </div>
+                <div className="mt-2 text-[11px] font-mono" style={{ color: aiReady ? SUCCESS : TEXT_MUTED }}>
+                  {aiStatus}
+                </div>
+              </div>
+            </Frame>
+
+            <Frame accent="#8ECAE6" className="p-4">
+              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <Cloud size={14} style={{ color: "#8ECAE6" }} />
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>SERVEUR DE SYNCHRO</p>
+                </div>
+                <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
+                  Les joueurs ne voient que compte + PIN — le serveur utilisé est celui du build
+                  {ENV_AI_SERVER_URL ? ` (${ENV_AI_SERVER_URL})` : " (aucun défini au build)"}. Renseigne une URL ici pour le forcer sur cet appareil.
+                </p>
+                <input
+                  value={syncSettings.serverUrl}
+                  onChange={(e) => setSyncSettings((s) => ({ ...s, serverUrl: e.target.value }))}
+                  placeholder="https://mon-ai-service.onrender.com"
+                  className="w-full px-2 py-2 rounded-md font-mono text-xs bg-transparent focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                />
+              </div>
+            </Frame>
+
+            <Frame accent={AMBER} className="p-4">
+              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <Database size={14} style={{ color: AMBER }} />
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>SESSION ADMIN</p>
+                </div>
+                <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
+                  Console accessible via le lien direct <span className="font-mono" style={{ color: TEXT }}>…/#admin</span>.
+                  La clé est vérifiée par le serveur à chaque action.
+                  {bankCount > 0 && ` Banque actuelle : ${bankCount} question${bankCount > 1 ? "s" : ""} distante${bankCount > 1 ? "s" : ""}.`}
+                </p>
+                <button
+                  onClick={() => { setAdminKey(""); exitAdmin(); }}
+                  className="px-3 py-2 rounded-lg font-mono text-xs"
+                  style={{ border: `1px solid ${DANGER}66`, color: DANGER }}
+                >
+                  Fermer la session admin sur cet appareil
+                </button>
+              </div>
+            </Frame>
+          </div>
         ) : (
           <Frame accent={AMBER} className="p-4">
             <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm flex flex-col gap-3">
@@ -2382,20 +2527,96 @@ function CodexView({ ctx }) {
   );
 }
 
+/* --- Admin : porte d'entrée (lien direct …/#admin) --------------------- */
+function AdminGateView({ ctx }) {
+  const { setAdminKey, exitAdmin } = ctx;
+  const [key, setKey] = useState("");
+  return (
+    <div className="min-h-screen w-full font-sans flex items-center justify-center px-4" style={{ backgroundColor: BG, color: TEXT }}>
+      <Frame accent={AMBER} className="p-5 w-full max-w-sm">
+        <div style={{ backgroundColor: PANEL }} className="p-5 -m-5 rounded-sm">
+          <div className="flex items-center gap-2 mb-2">
+            <Database size={16} style={{ color: AMBER }} />
+            <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>CONSOLE D'ADMINISTRATION</p>
+          </div>
+          <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
+            Accès réservé au gestionnaire de la banque de questions. La clé est vérifiée par le
+            serveur à chaque action — la saisir ici ne fait qu'afficher l'interface.
+          </p>
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (key.trim()) setAdminKey(key.trim()); }}
+            className="flex flex-col gap-2"
+          >
+            <input
+              type="password"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder="Clé admin"
+              autoFocus
+              className="px-3 py-2 rounded-md font-mono text-sm bg-transparent focus:outline-none"
+              style={{ border: `1px solid ${LINE}`, color: TEXT }}
+            />
+            <button type="submit" disabled={!key.trim()} className="px-3 py-2 rounded-lg font-mono text-sm disabled:opacity-40" style={{ backgroundColor: AMBER, color: BG }}>
+              Entrer
+            </button>
+            <button type="button" onClick={exitAdmin} className="text-[11px] font-mono underline self-center mt-1" style={{ color: TEXT_MUTED }}>
+              Retour au jeu
+            </button>
+          </form>
+        </div>
+      </Frame>
+    </div>
+  );
+}
+
 /* --- Carte du monde : parcours des secteurs -------------------------- */
 function MapView({ ctx }) {
   const {
     profile, soundOn, setSoundOn, setView, adaGreet, completedCount, levelInfo,
     badgeCount, isUnlocked, nextIdx, startModule, confirmReset, setConfirmReset, resetProgress,
     importText, setImportText, exportProgress, importProgress,
-    aiSettings, setAiSettings, aiReady, aiStatus,
     startDailyChallenge, startSrsSession, startQualificationExam, startTechnicalTrial,
-    syncSettings, setSyncSettings, syncStatus, syncBusy, syncNow,
-    adminKey, setAdminKey, bankCount,
+    syncSettings, setSyncSettings, syncStatus, syncBusy, syncNow, syncServerAvailable,
   } = ctx;
   const qualified = !!profile.qualification?.passed;
   const chantierUnlocked = qualified && completedCount >= Math.ceil(MODULES.length / 2);
   const foundationDone = FOUNDATION_TIER.every((id) => profile.results[id]?.passed);
+
+  // Menu ☰ et modales Sauvegarder / Restaurer / Synchronisation.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [modal, setModal] = useState(null); // null | save | restore | sync
+  const [restoreError, setRestoreError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  function openModal(id) {
+    setMenuOpen(false);
+    setRestoreError("");
+    setCopied(false);
+    setModal(id);
+  }
+  const closeModal = () => setModal(null);
+
+  async function handleRestoreText() {
+    const ok = await importProgress();
+    if (ok) closeModal();
+    else setRestoreError("Sauvegarde invalide — vérifie le contenu collé.");
+  }
+
+  async function handleRestoreFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const ok = await importProgress(await file.text());
+    if (ok) closeModal();
+    else setRestoreError("Sauvegarde invalide — vérifie le fichier choisi.");
+  }
+
+  function copySave() {
+    navigator.clipboard?.writeText(JSON.stringify(profile, null, 2)).then(
+      () => setCopied(true),
+      () => setCopied(false)
+    );
+  }
   return (
     <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
       <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
@@ -2418,6 +2639,24 @@ function MapView({ ctx }) {
                 <button onClick={() => setView("codex")} title="Codex" className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${LINE}`, color: AMBER }}>
                   <BookOpen size={16} />
                 </button>
+                <div className="relative">
+                  <button onClick={() => setMenuOpen((o) => !o)} title="Menu" className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ border: `1px solid ${LINE}`, color: menuOpen ? AMBER : TEXT_MUTED }}>
+                    <Menu size={16} />
+                  </button>
+                  {menuOpen && (
+                    <div className="absolute right-0 top-full mt-2 z-40 w-52 rounded-lg py-1" style={{ backgroundColor: PANEL_SOFT, border: `1px solid ${LINE}`, boxShadow: "0 10px 28px rgba(0,0,0,0.5)" }}>
+                      {[
+                        { id: "save", Icon: Download, label: "Sauvegarder" },
+                        { id: "restore", Icon: Upload, label: "Restaurer" },
+                        { id: "sync", Icon: Cloud, label: "Synchronisation" },
+                      ].map(({ id, Icon, label }) => (
+                        <button key={id} onClick={() => openModal(id)} className="w-full flex items-center gap-2 px-3 py-2 font-mono text-xs text-left hover:opacity-80" style={{ color: TEXT }}>
+                          <Icon size={13} style={{ color: TEXT_MUTED }} /> {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -2608,204 +2847,116 @@ function MapView({ ctx }) {
           )}
         </div>
 
-        <Frame accent={LINE} className="mt-8 p-4">
-          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
-            <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: TEXT_MUTED }}>SAUVEGARDE</p>
-            <div className="flex flex-col gap-2">
-              <button onClick={exportProgress} className="px-3 py-2 rounded-lg font-mono text-sm" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
-                Exporter la progression
-              </button>
-              <textarea
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                placeholder="Coller ici une sauvegarde JSON"
-                rows={4}
-                spellCheck={false}
-                className="w-full font-mono text-xs p-3 rounded-md resize-y focus:outline-none"
-                style={{ backgroundColor: "#081B33", border: `1px solid ${LINE}`, color: TEXT }}
-              />
-              <button onClick={importProgress} className="px-3 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: AMBER, color: "#0B2545" }}>
-                Importer la sauvegarde
-              </button>
-            </div>
-          </div>
-        </Frame>
+        {/* Clic hors du menu ☰ : referme */}
+        {menuOpen && <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />}
 
-        <Frame accent="#8ECAE6" className="mt-4 p-4">
-          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <MessageSquareText size={14} style={{ color: "#8ECAE6" }} />
-              <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>COACH IA LOCAL</p>
-            </div>
-            <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
-              Branché sur un serveur local (Ollama), un serveur OpenAI-compatible, ou ton propre ai-server FSQ déployé (Render).
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                Moteur
-                <select
-                  value={aiSettings.provider}
-                  onChange={(e) => {
-                    const provider = e.target.value;
-                    const presets = getEndpointPresets(provider);
-                    setAiSettings((s) => ({ ...s, provider, endpoint: presets[0]?.value || s.endpoint }));
-                  }}
-                  className="px-2 py-2 rounded-md focus:outline-none"
-                  style={{ border: `1px solid ${LINE}`, color: TEXT, backgroundColor: PANEL_SOFT }}
-                >
-                  <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value="ollama">Ollama</option>
-                  <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value="openai">OpenAI-compatible</option>
-                  <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value="fsq-server">Serveur FSQ (ai-server / Render)</option>
-                </select>
-              </label>
-              {(() => {
-                const presets = getEndpointPresets(aiSettings.provider);
-                const matched = presets.find((p) => p.value === aiSettings.endpoint);
-                const isCustom = !matched;
-                return (
-                  <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                    Endpoint
-                    <select
-                      value={isCustom ? CUSTOM_ENDPOINT : matched.value}
-                      onChange={(e) => {
-                        if (e.target.value === CUSTOM_ENDPOINT) return;
-                        setAiSettings((s) => ({ ...s, endpoint: e.target.value }));
-                      }}
-                      className="px-2 py-2 rounded-md focus:outline-none"
-                      style={{ border: `1px solid ${LINE}`, color: TEXT, backgroundColor: PANEL_SOFT }}
-                    >
-                      {presets.map((p) => (
-                        <option key={p.value} style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value={p.value}>{p.label}</option>
-                      ))}
-                      <option style={{ backgroundColor: PANEL_SOFT, color: TEXT }} value={CUSTOM_ENDPOINT}>Personnalisé…</option>
-                    </select>
-                    {isCustom && (
-                      <input
-                        value={aiSettings.endpoint}
-                        onChange={(e) => setAiSettings((s) => ({ ...s, endpoint: e.target.value }))}
-                        placeholder="https://..."
-                        className="mt-1 px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                        style={{ border: `1px solid ${LINE}`, color: TEXT }}
-                      />
-                    )}
+        {modal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(3,12,24,0.78)" }} onClick={closeModal}>
+            <div className="w-full max-w-md rounded-xl p-5" style={{ backgroundColor: PANEL, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  {modal === "save" && <Download size={14} style={{ color: AMBER }} />}
+                  {modal === "restore" && <Upload size={14} style={{ color: AMBER }} />}
+                  {modal === "sync" && <Cloud size={14} style={{ color: "#8ECAE6" }} />}
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>
+                    {modal === "save" ? "SAUVEGARDER" : modal === "restore" ? "RESTAURER" : "SYNCHRONISATION"}
+                  </p>
+                </div>
+                <button onClick={closeModal} title="Fermer" className="w-7 h-7 rounded-md flex items-center justify-center" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
+                  <X size={13} />
+                </button>
+              </div>
+
+              {modal === "save" && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
+                    Mets ta progression à l'abri dans un fichier. Tu pourras la restaurer plus tard, ou sur un autre appareil.
+                  </p>
+                  <button onClick={() => { exportProgress(); closeModal(); }} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
+                    <Download size={14} /> Télécharger la sauvegarde
+                  </button>
+                  <button onClick={copySave} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2" style={{ border: `1px solid ${LINE}`, color: copied ? SUCCESS : TEXT }}>
+                    <Copy size={14} /> {copied ? "Copié dans le presse-papiers ✓" : "Copier dans le presse-papiers"}
+                  </button>
+                </div>
+              )}
+
+              {modal === "restore" && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
+                    Recharge une sauvegarde depuis un fichier, ou colle son contenu. Ta progression actuelle sera remplacée.
+                  </p>
+                  <label className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 cursor-pointer" style={{ backgroundColor: AMBER, color: BG }}>
+                    <Upload size={14} /> Choisir un fichier…
+                    <input type="file" accept=".json,application/json" onChange={handleRestoreFile} className="hidden" />
                   </label>
-                );
-              })()}
-              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                Modèle
-                <input
-                  value={aiSettings.model}
-                  onChange={(e) => setAiSettings((s) => ({ ...s, model: e.target.value }))}
-                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
-                />
-              </label>
-              {aiSettings.provider === "fsq-server" && (
-                <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                  Clé API (si AI_API_KEY est définie côté serveur)
-                  <input
-                    type="password"
-                    value={aiSettings.apiKey || ""}
-                    onChange={(e) => setAiSettings((s) => ({ ...s, apiKey: e.target.value }))}
-                    className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                    style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                  <textarea
+                    value={importText}
+                    onChange={(e) => setImportText(e.target.value)}
+                    placeholder="…ou coller ici une sauvegarde"
+                    rows={4}
+                    spellCheck={false}
+                    className="w-full font-mono text-xs p-3 rounded-md resize-y focus:outline-none"
+                    style={{ backgroundColor: "#081B33", border: `1px solid ${LINE}`, color: TEXT }}
                   />
-                </label>
+                  <button onClick={handleRestoreText} disabled={!importText.trim()} className="px-3 py-2 rounded-lg font-mono text-sm disabled:opacity-40" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                    Restaurer le contenu collé
+                  </button>
+                  {restoreError && <p className="text-[11px] font-mono" style={{ color: DANGER }}>{restoreError}</p>}
+                </div>
+              )}
+
+              {modal === "sync" && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
+                    Retrouve ta progression sur tous tes appareils : choisis un nom de compte et un PIN,
+                    puis renseigne les mêmes sur l'autre appareil.
+                  </p>
+                  {!syncServerAvailable ? (
+                    <p className="text-[11px] font-mono p-2 rounded" style={{ color: TEXT_MUTED, border: `1px solid ${LINE}` }}>
+                      La synchronisation n'est pas activée sur cette installation.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                          Compte
+                          <input
+                            value={syncSettings.account}
+                            onChange={(e) => setSyncSettings((s) => ({ ...s, account: e.target.value }))}
+                            placeholder="ex: alice"
+                            className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                            style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                          PIN (optionnel)
+                          <input
+                            type="password"
+                            value={syncSettings.pin}
+                            onChange={(e) => setSyncSettings((s) => ({ ...s, pin: e.target.value }))}
+                            className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                            style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                          />
+                        </label>
+                      </div>
+                      <button
+                        onClick={syncNow}
+                        disabled={syncBusy || !syncSettings.account}
+                        className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 disabled:opacity-40"
+                        style={{ backgroundColor: AMBER, color: BG }}
+                      >
+                        <RefreshCw size={14} className={syncBusy ? "animate-spin" : ""} /> {syncBusy ? "Synchro…" : "Synchroniser maintenant"}
+                      </button>
+                      <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>{syncStatus}</p>
+                    </>
+                  )}
+                </div>
               )}
             </div>
-            <div className="mt-2 text-[11px] font-mono" style={{ color: aiReady ? SUCCESS : TEXT_MUTED }}>
-              {aiStatus}
-            </div>
           </div>
-        </Frame>
+        )}
 
-        <Frame accent="#8ECAE6" className="mt-4 p-4">
-          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <Cloud size={14} style={{ color: "#8ECAE6" }} />
-              <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>SYNCHRO MULTI-APPAREILS</p>
-            </div>
-            <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
-              Fais suivre ta progression entre appareils via ton ai-server déployé (Render). Un simple nom de
-              compte + PIN optionnel — pas un vrai système d'authentification, à réserver à un usage perso/partagé.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                Serveur (ai-server)
-                <input
-                  value={syncSettings.serverUrl}
-                  onChange={(e) => setSyncSettings((s) => ({ ...s, serverUrl: e.target.value }))}
-                  placeholder="https://mon-ai-service.onrender.com"
-                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                Compte
-                <input
-                  value={syncSettings.account}
-                  onChange={(e) => setSyncSettings((s) => ({ ...s, account: e.target.value }))}
-                  placeholder="ex: alice"
-                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                PIN (optionnel)
-                <input
-                  type="password"
-                  value={syncSettings.pin}
-                  onChange={(e) => setSyncSettings((s) => ({ ...s, pin: e.target.value }))}
-                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
-                />
-              </label>
-            </div>
-            <button
-              onClick={syncNow}
-              disabled={syncBusy}
-              className="mt-3 px-3 py-1.5 rounded-lg font-mono text-xs flex items-center gap-1.5 disabled:opacity-50"
-              style={{ border: `1px solid ${LINE}`, color: TEXT }}
-            >
-              <RefreshCw size={12} className={syncBusy ? "animate-spin" : ""} /> {syncBusy ? "Synchro…" : "Synchroniser maintenant"}
-            </button>
-            <div className="mt-2 text-[11px] font-mono" style={{ color: TEXT_MUTED }}>
-              {syncStatus}
-            </div>
-          </div>
-        </Frame>
-
-        <Frame accent={AMBER} className="mt-4 p-4">
-          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <Database size={14} style={{ color: AMBER }} />
-              <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>ADMINISTRATION</p>
-            </div>
-            <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
-              Réservé au gestionnaire de la banque de questions. La clé est vérifiée par le serveur à chaque action —
-              la renseigner ici ne fait qu'afficher l'interface.
-              {bankCount > 0 && ` Banque actuelle : ${bankCount} question${bankCount > 1 ? "s" : ""} distante${bankCount > 1 ? "s" : ""}.`}
-            </p>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={adminKey}
-                onChange={(e) => setAdminKey(e.target.value)}
-                placeholder="Clé admin"
-                className="flex-1 px-2 py-2 rounded-md font-mono text-xs bg-transparent focus:outline-none"
-                style={{ border: `1px solid ${LINE}`, color: TEXT }}
-              />
-              <button
-                onClick={() => setView("admin")}
-                disabled={!adminKey}
-                className="px-3 py-2 rounded-lg font-mono text-xs disabled:opacity-40"
-                style={{ backgroundColor: AMBER, color: BG }}
-              >
-                Ouvrir l'admin
-              </button>
-            </div>
-          </div>
-        </Frame>
       </div>
     </div>
   );
@@ -3296,10 +3447,11 @@ export default function FullstackQuest() {
         local = null;
       }
 
-      if (isSyncConfigured(syncSettings)) {
+      const sync = withSyncServer(syncSettings);
+      if (isSyncConfigured(sync)) {
         setSyncStatus("Synchronisation…");
         try {
-          const remote = await syncProfileGet(syncSettings);
+          const remote = await syncProfileGet(sync);
           const localTime = local?.updatedISO ? new Date(local.updatedISO).getTime() : 0;
           const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
           if (remote?.profile && remoteTime > localTime) {
@@ -3359,6 +3511,22 @@ export default function FullstackQuest() {
     } catch { /* ignore */ }
   }, [adminKey]);
 
+  // La console admin n'a aucun point d'entrée dans le jeu : uniquement le lien direct …/#admin.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const applyHash = () => { if (window.location.hash === "#admin") setView("admin"); };
+    applyHash();
+    window.addEventListener("hashchange", applyHash);
+    return () => window.removeEventListener("hashchange", applyHash);
+  }, []);
+
+  function exitAdmin() {
+    if (typeof window !== "undefined" && window.location.hash === "#admin") {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    setView("map");
+  }
+
   useEffect(() => {
     if (typeof document === "undefined" || document.getElementById("fsq-styles")) return;
     const el = document.createElement("style");
@@ -3402,29 +3570,31 @@ export default function FullstackQuest() {
     } catch {
       /* la progression reste en mémoire pour cette session même si la sauvegarde échoue */
     }
-    if (isSyncConfigured(syncSettings)) {
-      syncProfilePut(syncSettings, stamped)
-        .then(() => setSyncStatus(`Synchronisé · compte "${syncSettings.account}"`))
+    const sync = withSyncServer(syncSettings);
+    if (isSyncConfigured(sync)) {
+      syncProfilePut(sync, stamped)
+        .then(() => setSyncStatus(`Synchronisé · compte "${sync.account}"`))
         .catch((e) => setSyncStatus(`Échec de synchro: ${String(e?.message || e)}`));
     }
   }
 
   async function syncNow() {
-    if (!isSyncConfigured(syncSettings)) {
-      setSyncStatus("Configure un serveur et un compte d'abord.");
+    const sync = withSyncServer(syncSettings);
+    if (!isSyncConfigured(sync)) {
+      setSyncStatus("Choisis d'abord un nom de compte.");
       return;
     }
     setSyncBusy(true);
     try {
-      const remote = await syncProfileGet(syncSettings);
+      const remote = await syncProfileGet(sync);
       const localTime = profile?.updatedISO ? new Date(profile.updatedISO).getTime() : 0;
       const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
       if (remote?.profile && remoteTime > localTime) {
         await persist(withMigratedSrs({ ...FRESH, ...remote.profile }));
-        setSyncStatus(`Version distante plus récente adoptée · compte "${syncSettings.account}"`);
+        setSyncStatus(`Version distante plus récente adoptée · compte "${sync.account}"`);
       } else {
-        await syncProfilePut(syncSettings, profile);
-        setSyncStatus(`Poussé vers le serveur · compte "${syncSettings.account}"`);
+        await syncProfilePut(sync, profile);
+        setSyncStatus(`Poussé vers le serveur · compte "${sync.account}"`);
       }
     } catch (e) {
       setSyncStatus(`Échec de synchro: ${String(e?.message || e)}`);
@@ -3767,19 +3937,22 @@ export default function FullstackQuest() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  async function importProgress() {
-    if (!importText.trim()) return;
+  // textOverride : contenu d'un fichier choisi dans la modale Restaurer.
+  // Renvoie true/false pour que la modale sache fermer ou afficher l'erreur.
+  async function importProgress(textOverride) {
+    const text = String(textOverride ?? importText).trim();
+    if (!text) return false;
     try {
-      const parsed = JSON.parse(importText);
-      const next = withMigratedSrs({
-        ...FRESH,
-        ...(parsed && typeof parsed === "object" ? parsed : {}),
-      });
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object") throw new Error("invalid");
+      const next = withMigratedSrs({ ...FRESH, ...parsed });
       await persist(next);
       setImportText("");
       setView("map");
+      setAda("Sauvegarde restaurée — la Stack se souvient de toi.", "happy");
+      return true;
     } catch {
-      setAda("Sauvegarde invalide. Vérifie le JSON et réessaie.", "worried");
+      return false;
     }
   }
 
@@ -3863,11 +4036,12 @@ export default function FullstackQuest() {
     qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, startQualificationExam, finishQualificationExam,
     techCodeInput, setTechCodeInput, techResults, startTechnicalTrial, runTechnicalTests,
     syncSettings, setSyncSettings, syncStatus, syncBusy, syncNow,
-    adminKey, setAdminKey, refreshBank, bankCount,
+    syncServerAvailable: !!withSyncServer(syncSettings).serverUrl,
+    adminKey, setAdminKey, refreshBank, bankCount, exitAdmin,
   };
 
   /* ------------------------------ ROUTAGE ------------------------------ */
-  if (view === "admin" && adminKey) return <><AdminView ctx={ctx} /><InstallPrompt /></>;
+  if (view === "admin") return <>{adminKey ? <AdminView ctx={ctx} /> : <AdminGateView ctx={ctx} />}<InstallPrompt /></>;
   if (view === "codex") return <><CodexView ctx={ctx} /><InstallPrompt /></>;
   if (view === "intro") return <><IntroView ctx={ctx} /><InstallPrompt /></>;
   if (view === "battle") return <><BattleView ctx={ctx} /><InstallPrompt /></>;
