@@ -3,3 +3,6 @@ uvicorn[standard]==0.23.2
 pydantic==1.10.12
 httpx==0.24.1
 asyncpg==0.29.0
+PyJWT==2.8.0
+bcrypt==4.1.2
+cryptography==42.0.5

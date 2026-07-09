@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -5,13 +6,17 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+import accounts
+import core
+import payments as payments_routes
 
 logger = logging.getLogger("fsq-ai-server")
 
@@ -66,16 +71,19 @@ UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL", "").strip().rstrip("/")
 UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "").strip()
 ACCOUNT_RE = re.compile(r"^[a-zA-Z0-9_-]{3,32}$")
 
-# Postgres (Neon) — central question bank, authored by the admin via the in-app
-# admin view. Distinct key from AI_API_KEY: leaking the public key must never
-# grant write access to the bank.
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
+# Postgres (Neon), comptes, pass d'accès et paiements : voir core.py,
+# accounts.py, payme.py et payments.py. Les routers sont inclus plus bas.
 
-try:
-    import asyncpg
-except ImportError:  # AI-only deployments can run without the DB extra
-    asyncpg = None
+app.include_router(accounts.router)
+app.include_router(payments_routes.router)
+
+
+@app.on_event("startup")
+async def _start_background_jobs():
+    # Filet de sécurité du paiement (pas de webhook fiable chez PayMe) :
+    # ré-interroge les transactions en cours et expire les paiements trop vieux.
+    if core.db_available():
+        asyncio.create_task(payments_routes.reconcile_loop())
 
 
 # Enforced server-side (not just trusted from the frontend) so it applies to
@@ -111,12 +119,16 @@ def _auth(x_api_key: Optional[str]) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-async def _generate_stub(prompt: str, max_tokens: int) -> str:
+# Chaque générateur renvoie (texte, usage) où usage = {"in": tokens_entrée,
+# "out": tokens_sortie} quand l'amont le fournit — consommation réelle
+# facturable, journalisée par compte pour surveiller la marge.
+
+async def _generate_stub(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
     model_label = AI_MODEL or "stub-model"
-    return f"[{model_label}] Réponse simulée pour: {prompt[:240]}"
+    return f"[{model_label}] Réponse simulée pour: {prompt[:240]}", {}
 
 
-async def _generate_ollama(prompt: str, max_tokens: int) -> str:
+async def _generate_ollama(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
     upstream = AI_UPSTREAM_URL or "http://localhost:11434"
     # /api/generate has no separate system role — fold the scope instruction into the prompt text.
     scoped_prompt = f"{SCOPE_SYSTEM_PROMPT}\n\n---\n\n{prompt}"
@@ -130,10 +142,11 @@ async def _generate_ollama(prompt: str, max_tokens: int) -> str:
         raise HTTPException(status_code=502, detail=f"Ollama a renvoyé une erreur ({e.response.status_code}): {e.response.text[:500]}")
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Impossible de joindre Ollama à {upstream}: {e}")
-    return data.get("response", "")
+    usage = {"in": int(data.get("prompt_eval_count") or 0), "out": int(data.get("eval_count") or 0)}
+    return data.get("response", ""), usage
 
 
-async def _call_chat_completions(base_url: str, api_key: str, model: str, prompt: str, max_tokens: int) -> str:
+async def _call_chat_completions(base_url: str, api_key: str, model: str, prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
     payload = {
         "model": model,
         "messages": [
@@ -155,13 +168,15 @@ async def _call_chat_completions(base_url: str, api_key: str, model: str, prompt
         raise HTTPException(status_code=502, detail=f"Le fournisseur amont a renvoyé une erreur ({e.response.status_code}): {e.response.text[:500]}")
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Impossible de joindre le fournisseur amont ({base_url}): {e}")
+    raw_usage = data.get("usage") or {}
+    usage = {"in": int(raw_usage.get("prompt_tokens") or 0), "out": int(raw_usage.get("completion_tokens") or 0)}
     choices = data.get("choices") or []
     if not choices:
-        return ""
-    return choices[0].get("message", {}).get("content", "") or ""
+        return "", usage
+    return choices[0].get("message", {}).get("content", "") or "", usage
 
 
-async def _generate_openai_compatible(prompt: str, max_tokens: int) -> str:
+async def _generate_openai_compatible(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
     upstream = AI_UPSTREAM_URL
     if not upstream:
         raise HTTPException(status_code=500, detail="AI_UPSTREAM_URL is required for openai_compatible mode")
@@ -169,14 +184,14 @@ async def _generate_openai_compatible(prompt: str, max_tokens: int) -> str:
     return await _call_chat_completions(upstream, api_key, AI_MODEL or "local-model", prompt, max_tokens)
 
 
-async def _generate_openai(prompt: str, max_tokens: int) -> str:
+async def _generate_openai(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required for provider=openai")
     return await _call_chat_completions("https://api.openai.com/v1", api_key, AI_MODEL or "gpt-4o-mini", prompt, max_tokens)
 
 
-async def _generate_gemini(prompt: str, max_tokens: int) -> str:
+async def _generate_gemini(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is required for provider=gemini")
@@ -284,52 +299,10 @@ VALID_MODULES = {"js-fond", "js-avance", "async", "ts", "react", "next", "expres
 VALID_QTYPES = {"qcm", "code", "order"}
 VALID_STATUSES = {"active", "disabled"}
 
-QUESTIONS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS questions (
-  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  module_id     text NOT NULL,
-  qtype         text NOT NULL,
-  payload       jsonb NOT NULL,
-  technical     boolean NOT NULL DEFAULT false,
-  status        text NOT NULL DEFAULT 'active',
-  content_hash  text UNIQUE NOT NULL,
-  created_at    timestamptz NOT NULL DEFAULT now(),
-  updated_at    timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_questions_module_status ON questions (module_id, status);
-"""
-
-_pool = None
-
-
-def _clean_dsn(dsn: str) -> str:
-    # asyncpg rejects Neon's channel_binding DSN parameter — rebuild the query
-    # string without it (a plain regex breaks when it isn't the last parameter).
-    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-    parts = urlsplit(dsn)
-    query = urlencode([(k, v) for k, v in parse_qsl(parts.query) if k != "channel_binding"])
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
-
-
-async def _get_pool():
-    global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(_clean_dsn(DATABASE_URL), min_size=1, max_size=5)
-        async with _pool.acquire() as conn:
-            await conn.execute(QUESTIONS_SCHEMA)
-    return _pool
-
-
-def _require_db() -> None:
-    if not DATABASE_URL or asyncpg is None:
-        raise HTTPException(status_code=503, detail="La banque de questions n'est pas configurée sur ce serveur (DATABASE_URL manquante ou asyncpg absent).")
-
-
-def _require_admin(x_admin_key: Optional[str]) -> None:
-    if not ADMIN_API_KEY:
-        raise HTTPException(status_code=503, detail="ADMIN_API_KEY n'est pas configurée sur ce serveur.")
-    if not x_admin_key or x_admin_key != ADMIN_API_KEY:
-        raise HTTPException(status_code=401, detail="Clé admin invalide ou manquante.")
+# Le schéma (questions + comptes + paiements) et le pool vivent dans core.py.
+_get_pool = core.get_pool
+_require_db = core.require_db
+_require_admin = core.require_admin
 
 
 def _require_uuid(qid: str) -> None:
@@ -442,7 +415,7 @@ async def db_insert_question(module_id: str, qtype: str, technical: bool, payloa
                 "INSERT INTO questions (module_id, qtype, technical, payload, content_hash) VALUES ($1, $2, $3, $4, $5) RETURNING *",
                 module_id, qtype, technical, json.dumps(payload), chash,
             )
-        except asyncpg.UniqueViolationError:
+        except core.asyncpg.UniqueViolationError:
             raise HTTPException(status_code=409, detail="Une question quasi identique (même module, type et énoncé) existe déjà.")
     return _row_to_question(row)
 
@@ -456,7 +429,7 @@ async def db_update_question(qid: str, module_id: str, qtype: str, technical: bo
                 "UPDATE questions SET module_id=$2, qtype=$3, technical=$4, payload=$5, content_hash=$6, updated_at=now() WHERE id=$1 RETURNING *",
                 qid, module_id, qtype, technical, json.dumps(payload), chash,
             )
-        except asyncpg.UniqueViolationError:
+        except core.asyncpg.UniqueViolationError:
             raise HTTPException(status_code=409, detail="Une autre question quasi identique existe déjà.")
     if row is None:
         raise HTTPException(status_code=404, detail="Question introuvable.")
@@ -473,14 +446,22 @@ async def db_set_status(qid: str, status: str) -> Dict[str, Any]:
 
 
 @app.get("/api/v1/questions")
-async def public_questions(module: Optional[str] = None):
-    """Banque servie aux joueurs : questions actives uniquement, lecture publique
-    (le contenu part de toute façon dans le bundle de chaque joueur)."""
+async def public_questions(module: Optional[str] = None, authorization: Optional[str] = Header(default=None)):
+    """Banque servie aux joueurs : questions actives uniquement. Les modules de
+    la fondation sont publics ; les modules avancés ne sont servis qu'aux
+    comptes dont le pass d'accès est actif — c'est le verrou contenu."""
     _require_db()
+    has_pass = False
+    if accounts.auth_configured():
+        user = await accounts.optional_user(authorization)
+        if user is not None:
+            has_pass = await accounts.active_pass_expiry(user["id"]) is not None
     questions = await db_list_questions(module, "active", None)
+    if not has_pass:
+        questions = [q for q in questions if q["moduleId"] in core.FOUNDATION_MODULES]
     for q in questions:
         q.pop("status", None)
-    return {"questions": questions}
+    return {"questions": questions, "fullAccess": has_pass}
 
 
 @app.get("/api/v1/admin/questions")
@@ -526,22 +507,41 @@ MAX_PROMPT_CHARS = 4000
 
 
 @app.post("/api/v1/generate", response_model=GenerateResponse)
-async def generate(req: GenerateRequest, x_api_key: Optional[str] = Header(default=None)):
-    _auth(x_api_key)
+async def generate(req: GenerateRequest, x_api_key: Optional[str] = Header(default=None),
+                   authorization: Optional[str] = Header(default=None)):
+    # Deux voies d'accès :
+    #  - compte joueur (Bearer JWT) : exige un pass actif + quota journalier,
+    #    et journalise la consommation réelle de tokens ;
+    #  - clé partagée X-API-Key (legacy) : conservée pour l'admin et les tests.
+    user = None
+    if accounts.auth_configured():
+        user = await accounts.optional_user(authorization)
+    if user is not None:
+        if await accounts.active_pass_expiry(user["id"]) is None:
+            raise HTTPException(status_code=402, detail="Le coach IA fait partie de l'accès complet — débloque un pass depuis le menu Compte.")
+        settings = await core.get_settings()
+        daily_limit = int(settings["aiDailyHints"])
+        used = await accounts.consume_hint(user["id"], daily_limit)
+        if used is None:
+            raise HTTPException(status_code=429, detail=f"Quota d'indices du jour atteint ({daily_limit}/jour) — il se recharge demain.")
+    else:
+        _auth(x_api_key)
     if len(req.prompt) > MAX_PROMPT_CHARS:
         raise HTTPException(status_code=400, detail=f"Prompt trop long ({len(req.prompt)} caractères, max {MAX_PROMPT_CHARS}).")
     provider = AI_PROVIDER
     max_tokens = min(req.max_tokens or 256, MAX_TOKENS_CEILING)
     if provider == "ollama":
-        answer = await _generate_ollama(req.prompt, max_tokens)
+        answer, usage = await _generate_ollama(req.prompt, max_tokens)
     elif provider == "openai":
-        answer = await _generate_openai(req.prompt, max_tokens)
+        answer, usage = await _generate_openai(req.prompt, max_tokens)
     elif provider == "gemini":
-        answer = await _generate_gemini(req.prompt, max_tokens)
+        answer, usage = await _generate_gemini(req.prompt, max_tokens)
     elif provider in {"openai_compatible", "openai-compatible"}:
-        answer = await _generate_openai_compatible(req.prompt, max_tokens)
+        answer, usage = await _generate_openai_compatible(req.prompt, max_tokens)
     else:
-        answer = await _generate_stub(req.prompt, max_tokens)
+        answer, usage = await _generate_stub(req.prompt, max_tokens)
+    if user is not None:
+        await accounts.record_tokens(user["id"], usage.get("in", 0), usage.get("out", 0))
     return GenerateResponse(prompt=req.prompt, answer=answer)
 
 

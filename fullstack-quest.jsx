@@ -24,7 +24,7 @@ import {
   Volume2, VolumeX, BookOpen, MessageSquareText,
   Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle, Hammer,
   GraduationCap, Wrench, RefreshCw, Cloud, Plus, Trash2, Pencil, Database, Swords,
-  Menu, X, Download, Upload, Copy
+  Menu, X, Download, Upload, Copy, User, LogOut, Smartphone, Unlock
 } from "lucide-react";
 import {
   BG, PANEL, PANEL_SOFT, LINE, TEXT, TEXT_MUTED, AMBER, SUCCESS, DANGER,
@@ -1301,18 +1301,32 @@ const ENV_AI_SERVER_URL =
 const AI_DEFAULT = ENV_AI_SERVER_URL
   ? { provider: "fsq-server", endpoint: ENV_AI_SERVER_URL, model: "", apiKey: "" }
   : { provider: "ollama", endpoint: "http://localhost:11434", model: "llama3.2", apiKey: "" };
-const SYNC_SETTINGS_KEY = "fullstack-quest-sync-settings";
-const SYNC_DEFAULT = { serverUrl: "", account: "", pin: "" };
 const ADMIN_KEY_STORAGE = "fullstack-quest-admin-key";
-
-// Le serveur de synchro n'est jamais demandé à l'utilisateur : celui du build,
-// sauf override posé dans la console admin.
-function withSyncServer(s) {
-  return { ...(s || {}), serverUrl: String(s?.serverUrl || ENV_AI_SERVER_URL || "").trim() };
-}
+const AUTH_TOKEN_KEY = "fullstack-quest-auth-token";
+// Dernier /auth/me connu : permet de garder l'accès (pass, quota) hors-ligne.
+const AUTH_CACHE_KEY = "fullstack-quest-auth-cache";
 
 function bankApiBase() {
   return (ENV_AI_SERVER_URL || "http://localhost:8000").replace(/\/$/, "");
+}
+
+// Appel générique à l'ai-server ; l'erreur porte le detail FastAPI et le status HTTP.
+async function apiJson(path, { token, method = "GET", body } = {}) {
+  const res = await fetch(`${bankApiBase()}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data?.detail || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
 }
 
 async function adminFetch(path, adminKey, opts = {}) {
@@ -1390,9 +1404,10 @@ function collectAllQuestions(modules) {
   return all;
 }
 
-/* Appel générique à un serveur IA local (Ollama ou compatible OpenAI) — partagé
-   entre l'indice de question et l'indice de jalon de Chantier. */
-async function callAi(prompt, aiSettings) {
+/* Appel générique au coach IA — serveur FSQ (authentifié par compte) ou
+   serveur local (Ollama / OpenAI-compatible) pour le dev. Partagé entre
+   l'indice de question et l'indice de jalon de Chantier. */
+async function callAi(prompt, aiSettings, authToken) {
   const endpoint = String(aiSettings.endpoint || "").replace(/\/$/, "");
   try {
     let text = "";
@@ -1401,11 +1416,16 @@ async function callAi(prompt, aiSettings) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
           ...(aiSettings.apiKey ? { "X-API-Key": aiSettings.apiKey } : {}),
         },
         body: JSON.stringify({ prompt, max_tokens: 300 }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        // 402 = pass requis, 429 = quota du jour : messages serveur affichés tels quels
+        return { ok: false, error: body?.detail || `HTTP ${res.status}` };
+      }
       const data = await res.json();
       text = data?.answer || "";
     } else if (aiSettings.provider === "openai") {
@@ -1444,41 +1464,8 @@ async function callAi(prompt, aiSettings) {
     if (!cleaned) throw new Error("Réponse vide");
     return { ok: true, text: cleaned };
   } catch (e) {
-    return { ok: false, error: `IA locale indisponible: ${String(e?.message || e)}. Lance ton serveur local puis réessaie.` };
+    return { ok: false, error: `Coach IA indisponible: ${String(e?.message || e)}. Réessaie dans un instant.` };
   }
-}
-
-/* Synchronisation multi-appareils : un blob JSON par compte, via les routes
-   /api/v1/profile/{compte} de ton ai-server (relais vers Upstash Redis).
-   Pas de vraie authentification : un nom de compte + PIN optionnel suffisent
-   pour un usage personnel/partagé, pas pour héberger des données sensibles. */
-function isSyncConfigured(syncSettings) {
-  return !!(syncSettings?.serverUrl && syncSettings?.account);
-}
-
-async function syncProfileGet(syncSettings) {
-  const base = String(syncSettings.serverUrl || "").replace(/\/$/, "");
-  const res = await fetch(`${base}/api/v1/profile/${encodeURIComponent(syncSettings.account)}`, {
-    headers: syncSettings.pin ? { "X-Profile-PIN": syncSettings.pin } : {},
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.detail || `HTTP ${res.status}`);
-  return body; // { profile, updatedISO }
-}
-
-async function syncProfilePut(syncSettings, profileObj) {
-  const base = String(syncSettings.serverUrl || "").replace(/\/$/, "");
-  const res = await fetch(`${base}/api/v1/profile/${encodeURIComponent(syncSettings.account)}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      ...(syncSettings.pin ? { "X-Profile-PIN": syncSettings.pin } : {}),
-    },
-    body: JSON.stringify({ profile: profileObj, pin: syncSettings.pin || undefined }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.detail || `HTTP ${res.status}`);
-  return body;
 }
 
 /* ====================================================================== */
@@ -1898,7 +1885,7 @@ function SrsView({ ctx }) {
 
 /* --- Chantier : capstone construit hors de l'app, suivi ici ---------- */
 function ChantierView({ ctx }) {
-  const { profile, setView, aiSettings, toggleMilestone } = ctx;
+  const { profile, setView, aiSettings, authToken, toggleMilestone } = ctx;
   const [openId, setOpenId] = useState(null);
   const [hints, setHints] = useState({}); // { [milestoneId]: { busy, text, error } }
 
@@ -1914,7 +1901,7 @@ function ChantierView({ ctx }) {
       `Critères d'acceptation: ${m.acceptance.join(" | ")}`,
       "Réponds en français, ton direct, sans préambule, sans markdown lourd.",
     ].join("\n");
-    const result = await callAi(prompt, aiSettings);
+    const result = await callAi(prompt, aiSettings, authToken);
     setHints((h) => ({
       ...h,
       [m.id]: result.ok ? { busy: false, text: result.text, error: "" } : { busy: false, text: "", error: result.error },
@@ -2026,9 +2013,80 @@ function AdminView({ ctx }) {
   const {
     adminKey, setAdminKey, refreshBank, exitAdmin, bankCount,
     aiSettings, setAiSettings, aiReady, aiStatus,
-    syncSettings, setSyncSettings,
   } = ctx;
   const [tab, setTab] = useState("list"); // list | form | settings
+
+  // Réglages produit (tarifs, quota IA) et config PayMe — chargés du serveur
+  // à l'ouverture de l'onglet, enregistrés à la demande.
+  const [monet, setMonet] = useState(null); // { passPriceXaf, passDays, aiDailyHints }
+  const [paygate, setPaygate] = useState(null); // config masquée + session
+  const [paygatePassword, setPaygatePassword] = useState("");
+  const [settingsMsg, setSettingsMsg] = useState("");
+  const [settingsBusy, setSettingsBusy] = useState(false);
+
+  useEffect(() => {
+    if (tab !== "settings") return;
+    (async () => {
+      try {
+        setMonet(await adminFetch("/api/v1/admin/settings", adminKey));
+      } catch (e) {
+        setSettingsMsg(`Réglages indisponibles: ${String(e?.message || e)}`);
+      }
+      try {
+        setPaygate(await adminFetch("/api/v1/admin/paygate", adminKey));
+      } catch { /* paiement pas encore configuré côté serveur */ }
+    })();
+  }, [tab]);
+
+  async function saveMonet() {
+    setSettingsBusy(true);
+    setSettingsMsg("");
+    try {
+      const saved = await adminFetch("/api/v1/admin/settings", adminKey, {
+        method: "PATCH",
+        body: JSON.stringify({
+          passPriceXaf: Number(monet.passPriceXaf),
+          passDays: Number(monet.passDays),
+          aiDailyHints: Number(monet.aiDailyHints),
+        }),
+      });
+      setMonet(saved);
+      setSettingsMsg("Tarifs enregistrés — appliqués immédiatement.");
+    } catch (e) {
+      setSettingsMsg(`Échec: ${String(e?.message || e)}`);
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function savePaygate(patch) {
+    setSettingsBusy(true);
+    setSettingsMsg("");
+    try {
+      const saved = await adminFetch("/api/v1/admin/paygate", adminKey, { method: "PATCH", body: JSON.stringify(patch) });
+      setPaygate(saved);
+      setPaygatePassword("");
+      setSettingsMsg("Config PayMe enregistrée.");
+    } catch (e) {
+      setSettingsMsg(`Échec: ${String(e?.message || e)}`);
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function testPaygate() {
+    setSettingsBusy(true);
+    setSettingsMsg("");
+    try {
+      const saved = await adminFetch("/api/v1/admin/paygate/connect", adminKey, { method: "POST" });
+      setPaygate(saved);
+      setSettingsMsg(saved?.session?.status === "CONNECTED" ? "Connexion PayMe OK." : `Connexion: ${saved?.session?.status || "?"}`);
+    } catch (e) {
+      setSettingsMsg(`Connexion PayMe échouée: ${String(e?.message || e)}`);
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
   const [editingId, setEditingId] = useState(null);
   const [list, setList] = useState([]);
   const [listBusy, setListBusy] = useState(false);
@@ -2312,25 +2370,141 @@ function AdminView({ ctx }) {
               </div>
             </Frame>
 
+            <Frame accent={AMBER} className="p-4">
+              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <Unlock size={14} style={{ color: AMBER }} />
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>MONÉTISATION — PASS D'ACCÈS</p>
+                </div>
+                {!monet ? (
+                  <p className="text-xs font-mono" style={{ color: TEXT_MUTED }}>Chargement des réglages…</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-3 gap-2 mb-2">
+                      {[
+                        ["passPriceXaf", "Prix (FCFA)"],
+                        ["passDays", "Durée (jours)"],
+                        ["aiDailyHints", "Indices IA / jour"],
+                      ].map(([key, label]) => (
+                        <label key={key} className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                          {label}
+                          <input
+                            type="number"
+                            min="1"
+                            value={monet[key]}
+                            onChange={(e) => setMonet((s) => ({ ...s, [key]: e.target.value }))}
+                            className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                            style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <button onClick={saveMonet} disabled={settingsBusy} className="px-3 py-2 rounded-lg font-mono text-xs disabled:opacity-50" style={{ backgroundColor: AMBER, color: BG }}>
+                      Enregistrer les tarifs
+                    </button>
+                  </>
+                )}
+              </div>
+            </Frame>
+
             <Frame accent="#8ECAE6" className="p-4">
               <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
                 <div className="flex items-center gap-2 mb-2">
-                  <Cloud size={14} style={{ color: "#8ECAE6" }} />
-                  <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>SERVEUR DE SYNCHRO</p>
+                  <Smartphone size={14} style={{ color: "#8ECAE6" }} />
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>PAIEMENT — PAYME (MOBILE MONEY)</p>
+                  {paygate?.sandbox && (
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ color: AMBER, border: `1px solid ${AMBER}` }}>BAC À SABLE</span>
+                  )}
                 </div>
-                <p className="text-xs leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>
-                  Les joueurs ne voient que compte + PIN — le serveur utilisé est celui du build
-                  {ENV_AI_SERVER_URL ? ` (${ENV_AI_SERVER_URL})` : " (aucun défini au build)"}. Renseigne une URL ici pour le forcer sur cet appareil.
-                </p>
-                <input
-                  value={syncSettings.serverUrl}
-                  onChange={(e) => setSyncSettings((s) => ({ ...s, serverUrl: e.target.value }))}
-                  placeholder="https://mon-ai-service.onrender.com"
-                  className="w-full px-2 py-2 rounded-md font-mono text-xs bg-transparent focus:outline-none"
-                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
-                />
+                {!paygate ? (
+                  <p className="text-xs font-mono" style={{ color: TEXT_MUTED }}>
+                    Config indisponible (base non configurée côté serveur, ou secret de chiffrement manquant).
+                  </p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                      <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                        URL de l'API PayMe
+                        <input
+                          value={paygate.baseUrl || ""}
+                          onChange={(e) => setPaygate((s) => ({ ...s, baseUrl: e.target.value }))}
+                          placeholder="https://api.payme..."
+                          className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                          style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                        Identifiant marchand
+                        <input
+                          value={paygate.username || ""}
+                          onChange={(e) => setPaygate((s) => ({ ...s, username: e.target.value }))}
+                          className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                          style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                        Mot de passe {paygate.hasPassword ? "(défini — laisser vide pour conserver)" : "(requis)"}
+                        <input
+                          type="password"
+                          value={paygatePassword}
+                          onChange={(e) => setPaygatePassword(e.target.value)}
+                          className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                          style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                        Frais refacturés au client (%)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={paygate.clientFeesRate ?? 100}
+                          onChange={(e) => setPaygate((s) => ({ ...s, clientFeesRate: e.target.value }))}
+                          className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                          style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                        />
+                      </label>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs font-mono mb-3" style={{ color: TEXT }}>
+                      <input
+                        type="checkbox"
+                        checked={!!paygate.isActive}
+                        onChange={(e) => setPaygate((s) => ({ ...s, isActive: e.target.checked }))}
+                      />
+                      Paiement activé pour les joueurs
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => savePaygate({
+                          baseUrl: paygate.baseUrl || "",
+                          username: paygate.username || "",
+                          ...(paygatePassword ? { password: paygatePassword } : {}),
+                          clientFeesRate: Number(paygate.clientFeesRate ?? 100),
+                          isActive: !!paygate.isActive,
+                        })}
+                        disabled={settingsBusy}
+                        className="px-3 py-2 rounded-lg font-mono text-xs disabled:opacity-50"
+                        style={{ backgroundColor: AMBER, color: BG }}
+                      >
+                        Enregistrer la config
+                      </button>
+                      <button onClick={testPaygate} disabled={settingsBusy} className="px-3 py-2 rounded-lg font-mono text-xs disabled:opacity-50" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                        Tester la connexion
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] font-mono" style={{ color: paygate.session?.status === "CONNECTED" ? SUCCESS : TEXT_MUTED }}>
+                      Session : {paygate.session?.status || "—"}
+                      {paygate.session?.tokenExpiresAt ? ` · token jusqu'à ${new Date(paygate.session.tokenExpiresAt).toLocaleTimeString("fr-FR")}` : ""}
+                      {paygate.session?.lastLoginError ? ` · ${paygate.session.lastLoginError}` : ""}
+                    </p>
+                  </>
+                )}
               </div>
             </Frame>
+
+            {settingsMsg && (
+              <p className="text-xs font-mono p-2 rounded" style={{ color: TEXT, backgroundColor: PANEL_SOFT, border: `1px solid ${LINE}` }}>{settingsMsg}</p>
+            )}
 
             <Frame accent={AMBER} className="p-4">
               <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
@@ -2569,53 +2743,261 @@ function AdminGateView({ ctx }) {
   );
 }
 
+/* --- Connexion / inscription (contenu de la modale Compte) ------------- */
+function AccountAuthForm({ ctx }) {
+  const { accountAuth } = ctx;
+  const [mode, setMode] = useState("login"); // login | register
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await accountAuth(mode, mode === "login" ? { email, password } : { email, password, displayName });
+    } catch (err) {
+      setError(String(err?.message || err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inputStyle = { border: `1px solid ${LINE}`, color: TEXT };
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2">
+      <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
+        Ton compte garde ta progression en sécurité et te suit sur tous tes appareils. Gratuit, en 30 secondes.
+      </p>
+      <div className="grid grid-cols-2 gap-2 mb-1">
+        {[["login", "Connexion"], ["register", "Inscription"]].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => { setMode(id); setError(""); }}
+            className="px-3 py-1.5 rounded-lg font-mono text-xs"
+            style={{ backgroundColor: mode === id ? AMBER : PANEL_SOFT, color: mode === id ? BG : TEXT, border: `1px solid ${mode === id ? AMBER : LINE}` }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {mode === "register" && (
+        <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Nom d'affichage (ex: Alice)"
+          className="px-3 py-2 rounded-md font-mono text-sm bg-transparent focus:outline-none" style={inputStyle} />
+      )}
+      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email"
+        className="px-3 py-2 rounded-md font-mono text-sm bg-transparent focus:outline-none" style={inputStyle} />
+      <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+        placeholder={mode === "register" ? "Mot de passe (6 caractères min.)" : "Mot de passe"}
+        className="px-3 py-2 rounded-md font-mono text-sm bg-transparent focus:outline-none" style={inputStyle} />
+      <button type="submit" disabled={busy || !email.trim() || !password || (mode === "register" && !displayName.trim())}
+        className="px-3 py-2 rounded-lg font-mono text-sm disabled:opacity-40" style={{ backgroundColor: AMBER, color: BG }}>
+        {busy ? "Un instant…" : mode === "login" ? "Se connecter" : "Créer mon compte"}
+      </button>
+      {error && <p className="text-[11px] font-mono" style={{ color: DANGER }}>{error}</p>}
+    </form>
+  );
+}
+
+/* --- Modales globales : sauvegarde, restauration, compte, paiement ------ */
+/* Rendues par-dessus la vue courante (carte, duel, chantier…), pour que le
+   déblocage soit accessible partout où un verrou est visible. */
+function ModalsHost({ ctx }) {
+  const {
+    modal, openModal, closeModal,
+    exportProgress, copySave, copied,
+    importText, setImportText, handleRestoreText, handleRestoreFile, restoreError,
+    authToken, authUser, access, hasPass, accountLogout, accountSyncNow, syncStatus, syncBusy,
+    payPhone, setPayPhone, payBusy, payError, payment, startCheckout,
+  } = ctx;
+  if (!modal) return null;
+
+  const passPrice = access?.passPriceXaf ?? 1500;
+  const passDays = access?.passDays ?? 30;
+  const fmtDate = (iso) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  const titles = { save: "SAUVEGARDER", restore: "RESTAURER", account: "COMPTE", pay: "ACCÈS COMPLET" };
+  const payFailed = payment && ["FAILED", "EXPIRED", "TIMEOUT"].includes(payment.status);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(3,12,24,0.78)" }} onClick={closeModal}>
+      <div className="w-full max-w-md rounded-xl p-5 max-h-[90vh] overflow-y-auto" style={{ backgroundColor: PANEL, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            {modal === "save" && <Download size={14} style={{ color: AMBER }} />}
+            {modal === "restore" && <Upload size={14} style={{ color: AMBER }} />}
+            {modal === "account" && <User size={14} style={{ color: "#8ECAE6" }} />}
+            {modal === "pay" && <Unlock size={14} style={{ color: AMBER }} />}
+            <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>{titles[modal]}</p>
+          </div>
+          <button onClick={closeModal} title="Fermer" className="w-7 h-7 rounded-md flex items-center justify-center" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
+            <X size={13} />
+          </button>
+        </div>
+
+        {modal === "save" && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
+              Mets ta progression à l'abri dans un fichier. Tu pourras la restaurer plus tard, ou sur un autre appareil.
+            </p>
+            <button onClick={() => { exportProgress(); closeModal(); }} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
+              <Download size={14} /> Télécharger la sauvegarde
+            </button>
+            <button onClick={copySave} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2" style={{ border: `1px solid ${LINE}`, color: copied ? SUCCESS : TEXT }}>
+              <Copy size={14} /> {copied ? "Copié dans le presse-papiers ✓" : "Copier dans le presse-papiers"}
+            </button>
+          </div>
+        )}
+
+        {modal === "restore" && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
+              Recharge une sauvegarde depuis un fichier, ou colle son contenu. Ta progression actuelle sera remplacée.
+            </p>
+            <label className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 cursor-pointer" style={{ backgroundColor: AMBER, color: BG }}>
+              <Upload size={14} /> Choisir un fichier…
+              <input type="file" accept=".json,application/json" onChange={handleRestoreFile} className="hidden" />
+            </label>
+            <textarea
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder="…ou coller ici une sauvegarde"
+              rows={4}
+              spellCheck={false}
+              className="w-full font-mono text-xs p-3 rounded-md resize-y focus:outline-none"
+              style={{ backgroundColor: "#081B33", border: `1px solid ${LINE}`, color: TEXT }}
+            />
+            <button onClick={handleRestoreText} disabled={!importText.trim()} className="px-3 py-2 rounded-lg font-mono text-sm disabled:opacity-40" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+              Restaurer le contenu collé
+            </button>
+            {restoreError && <p className="text-[11px] font-mono" style={{ color: DANGER }}>{restoreError}</p>}
+          </div>
+        )}
+
+        {modal === "account" && (
+          authToken && authUser ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs" style={{ color: TEXT_MUTED }}>
+                Connecté : <span style={{ color: TEXT }} className="font-semibold">{authUser.user.displayName}</span> · {authUser.user.email}
+              </p>
+              <div className="p-3 rounded-lg" style={{ border: `1px solid ${hasPass ? SUCCESS : LINE}`, backgroundColor: hasPass ? `${SUCCESS}0D` : "transparent" }}>
+                {hasPass ? (
+                  <>
+                    <p className="font-mono text-[11px] tracking-widest mb-1" style={{ color: SUCCESS }}>ACCÈS COMPLET ACTIF</p>
+                    <p className="text-xs" style={{ color: TEXT }}>Jusqu'au {fmtDate(access.passExpiresAt)}</p>
+                    <p className="text-[11px] font-mono mt-1" style={{ color: TEXT_MUTED }}>
+                      Coach IA : {access.aiUsedToday}/{access.aiDailyLimit} indices utilisés aujourd'hui
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-mono text-[11px] tracking-widest mb-1" style={{ color: TEXT_MUTED }}>ACCÈS FONDATION (GRATUIT)</p>
+                    <p className="text-xs" style={{ color: TEXT_MUTED }}>JS, JS Avancé et Async. Le reste de la Stack t'attend.</p>
+                  </>
+                )}
+              </div>
+              <button onClick={() => openModal("pay")} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
+                <Unlock size={14} /> {hasPass ? `Prolonger — ${passPrice.toLocaleString("fr-FR")} FCFA / ${passDays} j` : `Débloquer l'accès complet — ${passPrice.toLocaleString("fr-FR")} FCFA`}
+              </button>
+              <button onClick={accountSyncNow} disabled={syncBusy} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 disabled:opacity-50" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                <RefreshCw size={14} className={syncBusy ? "animate-spin" : ""} /> {syncBusy ? "Synchro…" : "Synchroniser maintenant"}
+              </button>
+              {syncStatus && <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>{syncStatus}</p>}
+              <button onClick={accountLogout} className="mt-1 px-3 py-2 rounded-lg font-mono text-xs flex items-center justify-center gap-2" style={{ border: `1px solid ${DANGER}66`, color: DANGER }}>
+                <LogOut size={13} /> Se déconnecter de cet appareil
+              </button>
+            </div>
+          ) : (
+            <AccountAuthForm ctx={ctx} />
+          )
+        )}
+
+        {modal === "pay" && (
+          !authToken ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
+                L'accès complet est lié à ton compte : crée-le d'abord (gratuit), ta progression te suivra partout.
+              </p>
+              <button onClick={() => openModal("account")} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
+                <User size={14} /> Créer mon compte / Me connecter
+              </button>
+            </div>
+          ) : payment && payment.status === "PAID" ? (
+            <div className="flex flex-col gap-2 text-center py-2">
+              <p className="text-2xl">🎉</p>
+              <p className="font-mono text-sm font-bold" style={{ color: SUCCESS }}>Paiement confirmé — accès complet activé !</p>
+              {payment.passExpiresAt && (
+                <p className="text-xs" style={{ color: TEXT_MUTED }}>Valable jusqu'au {fmtDate(payment.passExpiresAt)}.</p>
+              )}
+              <button onClick={closeModal} className="mt-2 px-3 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: SUCCESS, color: BG }}>
+                Retourner purifier la Stack
+              </button>
+            </div>
+          ) : payment && payment.status === "PROCESSING" ? (
+            <div className="flex flex-col gap-3 text-center py-3">
+              <RefreshCw size={26} className="animate-spin mx-auto" style={{ color: AMBER }} />
+              <p className="font-mono text-sm font-bold">Valide le paiement sur ton téléphone</p>
+              <p className="text-xs leading-relaxed" style={{ color: TEXT_MUTED }}>
+                Une demande Mobile Money vient d'être envoyée au {payPhone}. Compose ton code secret pour confirmer —
+                l'accès s'activera ici automatiquement.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs leading-relaxed" style={{ color: TEXT_MUTED }}>
+                Les 6 secteurs avancés (TS, React, Next.js, Express, Vite, Boss final), l'Examen de Qualification,
+                les Épreuves Techniques, le Chantier et le coach IA ({access?.aiDailyLimit ?? 20} indices/jour).
+              </p>
+              <p className="font-mono text-center text-2xl font-bold my-1" style={{ color: AMBER }}>
+                {passPrice.toLocaleString("fr-FR")} FCFA <span className="text-xs font-normal" style={{ color: TEXT_MUTED }}>/ {passDays} jours</span>
+              </p>
+              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                Numéro Mobile Money (MTN MoMo / Orange Money)
+                <input
+                  value={payPhone}
+                  onChange={(e) => setPayPhone(e.target.value)}
+                  placeholder="6XX XX XX XX"
+                  inputMode="tel"
+                  className="px-3 py-2 rounded-md font-mono text-sm bg-transparent focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                />
+              </label>
+              <button onClick={startCheckout} disabled={payBusy || !payPhone.trim()} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: AMBER, color: BG }}>
+                <Smartphone size={14} /> {payBusy ? "Initialisation…" : "Payer par Mobile Money"}
+              </button>
+              {payFailed && (
+                <p className="text-[11px] font-mono" style={{ color: DANGER }}>
+                  {payment.status === "FAILED" ? "Paiement refusé ou annulé — vérifie ton solde et réessaie." : "La demande a expiré sans confirmation — réessaie."}
+                </p>
+              )}
+              {payError && <p className="text-[11px] font-mono" style={{ color: DANGER }}>{payError}</p>}
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* --- Carte du monde : parcours des secteurs -------------------------- */
 function MapView({ ctx }) {
   const {
     profile, soundOn, setSoundOn, setView, adaGreet, completedCount, levelInfo,
     badgeCount, isUnlocked, nextIdx, startModule, confirmReset, setConfirmReset, resetProgress,
-    importText, setImportText, exportProgress, importProgress,
     startDailyChallenge, startSrsSession, startQualificationExam, startTechnicalTrial,
-    syncSettings, setSyncSettings, syncStatus, syncBusy, syncNow, syncServerAvailable,
+    authToken, authUser, access, hasPass, openModal,
   } = ctx;
   const qualified = !!profile.qualification?.passed;
-  const chantierUnlocked = qualified && completedCount >= Math.ceil(MODULES.length / 2);
+  const chantierUnlocked = hasPass && qualified && completedCount >= Math.ceil(MODULES.length / 2);
   const foundationDone = FOUNDATION_TIER.every((id) => profile.results[id]?.passed);
+  const passPrice = access?.passPriceXaf ?? 1500;
+  const passDays = access?.passDays ?? 30;
+  // Vers la modale de paiement — en passant par la création de compte si besoin.
+  const unlockTarget = authToken ? "pay" : "account";
 
-  // Menu ☰ et modales Sauvegarder / Restaurer / Synchronisation.
   const [menuOpen, setMenuOpen] = useState(false);
-  const [modal, setModal] = useState(null); // null | save | restore | sync
-  const [restoreError, setRestoreError] = useState("");
-  const [copied, setCopied] = useState(false);
-
-  function openModal(id) {
+  function openFromMenu(id) {
     setMenuOpen(false);
-    setRestoreError("");
-    setCopied(false);
-    setModal(id);
-  }
-  const closeModal = () => setModal(null);
-
-  async function handleRestoreText() {
-    const ok = await importProgress();
-    if (ok) closeModal();
-    else setRestoreError("Sauvegarde invalide — vérifie le contenu collé.");
-  }
-
-  async function handleRestoreFile(e) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    const ok = await importProgress(await file.text());
-    if (ok) closeModal();
-    else setRestoreError("Sauvegarde invalide — vérifie le fichier choisi.");
-  }
-
-  function copySave() {
-    navigator.clipboard?.writeText(JSON.stringify(profile, null, 2)).then(
-      () => setCopied(true),
-      () => setCopied(false)
-    );
+    openModal(id);
   }
   return (
     <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
@@ -2646,12 +3028,12 @@ function MapView({ ctx }) {
                   {menuOpen && (
                     <div className="absolute right-0 top-full mt-2 z-40 w-52 rounded-lg py-1" style={{ backgroundColor: PANEL_SOFT, border: `1px solid ${LINE}`, boxShadow: "0 10px 28px rgba(0,0,0,0.5)" }}>
                       {[
+                        { id: "account", Icon: User, label: authUser ? authUser.user.displayName : "Compte" },
                         { id: "save", Icon: Download, label: "Sauvegarder" },
                         { id: "restore", Icon: Upload, label: "Restaurer" },
-                        { id: "sync", Icon: Cloud, label: "Synchronisation" },
                       ].map(({ id, Icon, label }) => (
-                        <button key={id} onClick={() => openModal(id)} className="w-full flex items-center gap-2 px-3 py-2 font-mono text-xs text-left hover:opacity-80" style={{ color: TEXT }}>
-                          <Icon size={13} style={{ color: TEXT_MUTED }} /> {label}
+                        <button key={id} onClick={() => openFromMenu(id)} className="w-full flex items-center gap-2 px-3 py-2 font-mono text-xs text-left hover:opacity-80" style={{ color: TEXT }}>
+                          <Icon size={13} style={{ color: id === "account" && hasPass ? SUCCESS : TEXT_MUTED }} /> <span className="truncate">{label}</span>
                         </button>
                       ))}
                     </div>
@@ -2693,6 +3075,26 @@ function MapView({ ctx }) {
           </div>
         </Frame>
 
+        {/* Bannière accès complet (les joueurs fondation voient l'offre en un coup d'œil) */}
+        {!hasPass && (
+          <button
+            onClick={() => openModal(unlockTarget)}
+            className="w-full mt-6 p-4 rounded-lg text-left flex items-center gap-3 hover:opacity-90 transition-opacity"
+            style={{ background: `linear-gradient(90deg, ${AMBER}26, transparent 70%)`, border: `1px solid ${AMBER}` }}
+          >
+            <Unlock size={20} style={{ color: AMBER }} className="shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="font-mono text-xs tracking-widest mb-0.5" style={{ color: AMBER }}>
+                ACCÈS COMPLET — {passPrice.toLocaleString("fr-FR")} FCFA / {passDays} JOURS
+              </p>
+              <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>
+                6 secteurs avancés · Qualification · Épreuves Techniques · Chantier · Coach IA — paiement Mobile Money
+              </p>
+            </div>
+            <ChevronRight size={16} style={{ color: AMBER }} className="shrink-0" />
+          </button>
+        )}
+
         {/* Daily Challenge & SRS Quick Access */}
         <div className="mt-8 grid grid-cols-2 gap-3 mb-3">
           <button
@@ -2713,9 +3115,10 @@ function MapView({ ctx }) {
           </button>
         </div>
 
-        {/* Examen de Qualification : condition d'accès aux secteurs avancés + au Chantier */}
+        {/* Examen de Qualification : condition d'accès aux secteurs avancés + au Chantier.
+            Réservé à l'accès complet — le bouton devient le point de conversion. */}
         <button
-          onClick={() => foundationDone && startQualificationExam()}
+          onClick={() => foundationDone && (hasPass ? startQualificationExam() : openModal(unlockTarget))}
           disabled={!foundationDone}
           className="w-full p-4 rounded-lg text-left transition-colors hover:opacity-80 mb-8 flex items-center gap-3 disabled:cursor-not-allowed disabled:opacity-50"
           style={{ backgroundColor: qualified ? `${SUCCESS}14` : `${AMBER}14`, border: `1px solid ${qualified ? SUCCESS : AMBER}` }}
@@ -2730,6 +3133,8 @@ function MapView({ ctx }) {
                 ? "Termine JS, JS Avancé et Async pour pouvoir le tenter"
                 : qualified
                 ? `Débloque les secteurs avancés et le Chantier · meilleur score ${profile.qualification?.bestScore || 0}%`
+                : !hasPass
+                ? "Prêt à te qualifier ? Débloque l'accès complet pour passer l'examen"
                 : `Requis pour les secteurs avancés et le Chantier · seuil ${QUALIFICATION_PASS_PCT}% · meilleur score ${profile.qualification?.bestScore || 0}%`}
             </p>
           </div>
@@ -2749,7 +3154,7 @@ function MapView({ ctx }) {
             <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>
               {chantierUnlocked
                 ? `${CHANTIER.milestones.filter((m) => profile.chantier?.milestones?.[m.id]?.done).length}/${CHANTIER.milestones.length} jalons · dans ton propre éditeur`
-                : `Débloqué avec la Qualification + ${Math.ceil(MODULES.length / 2)} secteurs purifiés`}
+                : `Accès complet + Qualification + ${Math.ceil(MODULES.length / 2)} secteurs purifiés`}
             </p>
           </div>
           {chantierUnlocked && <ChevronRight size={18} style={{ color: AMBER }} />}
@@ -2764,7 +3169,9 @@ function MapView({ ctx }) {
             const best = result?.bestScore;
             const isNext = unlocked && !passed && idx === nextIdx;
             const prevPassed = idx === 0 || !!profile.results[MODULES[idx - 1].id]?.passed;
-            const blockedByQualification = !unlocked && prevPassed && ADVANCED_TIER.includes(mod.id) && !qualified;
+            // Le verrou pass prime sur le verrou qualification dans l'affichage.
+            const blockedByPass = !unlocked && prevPassed && ADVANCED_TIER.includes(mod.id) && !hasPass;
+            const blockedByQualification = !unlocked && prevPassed && !blockedByPass && ADVANCED_TIER.includes(mod.id) && !qualified;
             const techUnlocked = isTechnicalUnlocked(profile, mod);
             const techDone = isTechnicalDone(profile, mod);
 
@@ -2774,14 +3181,16 @@ function MapView({ ctx }) {
                   <div className="ml-8 w-0.5 h-6" style={{ backgroundImage: `repeating-linear-gradient(to bottom, ${unlocked ? mod.accent : LINE} 0, ${unlocked ? mod.accent : LINE} 4px, transparent 4px, transparent 9px)` }} />
                 )}
                 <button
-                  disabled={!unlocked}
-                  onClick={() => unlocked && startModule(idx)}
+                  disabled={!unlocked && !blockedByPass}
+                  onClick={() => (unlocked ? startModule(idx) : blockedByPass ? openModal(unlockTarget) : undefined)}
                   className="w-full text-left flex items-center gap-3 p-3 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed group"
-                  style={{ backgroundColor: unlocked ? PANEL : "transparent", opacity: unlocked ? 1 : 0.5, border: isNext ? `1px solid ${AMBER}` : "1px solid transparent" }}
+                  style={{ backgroundColor: unlocked ? PANEL : "transparent", opacity: unlocked ? 1 : blockedByPass ? 0.75 : 0.5, border: isNext ? `1px solid ${AMBER}` : "1px solid transparent" }}
                 >
                   <div className="relative shrink-0 w-16 h-16 rounded-xl flex items-center justify-center" style={{ backgroundColor: unlocked ? `${mod.accent}18` : PANEL_SOFT, border: `1px solid ${unlocked ? mod.accent : LINE}` }}>
                     {unlocked ? (
                       <BossAvatar kind={mod.boss.kind} accent={mod.accent} state={passed ? "defeated" : "idle"} size={54} />
+                    ) : blockedByPass ? (
+                      <Unlock size={20} style={{ color: AMBER }} />
                     ) : blockedByQualification ? (
                       <GraduationCap size={20} style={{ color: TEXT_MUTED }} />
                     ) : (
@@ -2794,11 +3203,11 @@ function MapView({ ctx }) {
 
                   <div className="flex-1 min-w-0">
                     <p className="font-mono font-bold text-sm sm:text-base truncate" style={{ color: unlocked ? TEXT : TEXT_MUTED }}>{mod.title}</p>
-                    <p className="text-[11px] font-mono truncate" style={{ color: unlocked ? mod.accent : TEXT_MUTED }}>
-                      {unlocked ? `${mod.boss.name} — ${mod.boss.epithet}` : blockedByQualification ? "Nécessite l'Examen de Qualification" : "Secteur scellé"}
+                    <p className="text-[11px] font-mono truncate" style={{ color: unlocked ? mod.accent : blockedByPass ? AMBER : TEXT_MUTED }}>
+                      {unlocked ? `${mod.boss.name} — ${mod.boss.epithet}` : blockedByPass ? "Réservé à l'accès complet" : blockedByQualification ? "Nécessite l'Examen de Qualification" : "Secteur scellé"}
                     </p>
                     <p className="text-[11px] font-mono mt-0.5" style={{ color: passed ? SUCCESS : isNext ? AMBER : TEXT_MUTED }}>
-                      {!unlocked ? "Verrouillé" : passed ? `Purifié — record ${best}%${result?.flawless ? " · sans dégât" : ""}` : isNext ? "▶ PROCHAIN DUEL" : best ? `Échec — dernier ${best}%` : "Prêt au combat"}
+                      {!unlocked ? (blockedByPass ? `Débloquer — ${passPrice.toLocaleString("fr-FR")} FCFA / ${passDays} j` : "Verrouillé") : passed ? `Purifié — record ${best}%${result?.flawless ? " · sans dégât" : ""}` : isNext ? "▶ PROCHAIN DUEL" : best ? `Échec — dernier ${best}%` : "Prêt au combat"}
                     </p>
                   </div>
 
@@ -2810,6 +3219,14 @@ function MapView({ ctx }) {
                     <div className="ml-[76px] mt-1 flex items-center gap-1.5 font-mono text-[10px]" style={{ color: SUCCESS }}>
                       <Wrench size={11} /> Épreuve Technique certifiée
                     </div>
+                  ) : techUnlocked && !hasPass ? (
+                    <button
+                      onClick={() => openModal(unlockTarget)}
+                      className="ml-[76px] mt-1 flex items-center gap-1.5 font-mono text-[10px] hover:opacity-80"
+                      style={{ color: AMBER }}
+                    >
+                      <Wrench size={11} /> Épreuve Technique — réservée à l'accès complet →
+                    </button>
                   ) : techUnlocked ? (
                     <button
                       onClick={() => startTechnicalTrial(idx)}
@@ -2849,114 +3266,6 @@ function MapView({ ctx }) {
 
         {/* Clic hors du menu ☰ : referme */}
         {menuOpen && <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />}
-
-        {modal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(3,12,24,0.78)" }} onClick={closeModal}>
-            <div className="w-full max-w-md rounded-xl p-5" style={{ backgroundColor: PANEL, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between gap-2 mb-3">
-                <div className="flex items-center gap-2">
-                  {modal === "save" && <Download size={14} style={{ color: AMBER }} />}
-                  {modal === "restore" && <Upload size={14} style={{ color: AMBER }} />}
-                  {modal === "sync" && <Cloud size={14} style={{ color: "#8ECAE6" }} />}
-                  <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>
-                    {modal === "save" ? "SAUVEGARDER" : modal === "restore" ? "RESTAURER" : "SYNCHRONISATION"}
-                  </p>
-                </div>
-                <button onClick={closeModal} title="Fermer" className="w-7 h-7 rounded-md flex items-center justify-center" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
-                  <X size={13} />
-                </button>
-              </div>
-
-              {modal === "save" && (
-                <div className="flex flex-col gap-2">
-                  <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
-                    Mets ta progression à l'abri dans un fichier. Tu pourras la restaurer plus tard, ou sur un autre appareil.
-                  </p>
-                  <button onClick={() => { exportProgress(); closeModal(); }} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
-                    <Download size={14} /> Télécharger la sauvegarde
-                  </button>
-                  <button onClick={copySave} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2" style={{ border: `1px solid ${LINE}`, color: copied ? SUCCESS : TEXT }}>
-                    <Copy size={14} /> {copied ? "Copié dans le presse-papiers ✓" : "Copier dans le presse-papiers"}
-                  </button>
-                </div>
-              )}
-
-              {modal === "restore" && (
-                <div className="flex flex-col gap-2">
-                  <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
-                    Recharge une sauvegarde depuis un fichier, ou colle son contenu. Ta progression actuelle sera remplacée.
-                  </p>
-                  <label className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 cursor-pointer" style={{ backgroundColor: AMBER, color: BG }}>
-                    <Upload size={14} /> Choisir un fichier…
-                    <input type="file" accept=".json,application/json" onChange={handleRestoreFile} className="hidden" />
-                  </label>
-                  <textarea
-                    value={importText}
-                    onChange={(e) => setImportText(e.target.value)}
-                    placeholder="…ou coller ici une sauvegarde"
-                    rows={4}
-                    spellCheck={false}
-                    className="w-full font-mono text-xs p-3 rounded-md resize-y focus:outline-none"
-                    style={{ backgroundColor: "#081B33", border: `1px solid ${LINE}`, color: TEXT }}
-                  />
-                  <button onClick={handleRestoreText} disabled={!importText.trim()} className="px-3 py-2 rounded-lg font-mono text-sm disabled:opacity-40" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
-                    Restaurer le contenu collé
-                  </button>
-                  {restoreError && <p className="text-[11px] font-mono" style={{ color: DANGER }}>{restoreError}</p>}
-                </div>
-              )}
-
-              {modal === "sync" && (
-                <div className="flex flex-col gap-2">
-                  <p className="text-xs leading-relaxed mb-1" style={{ color: TEXT_MUTED }}>
-                    Retrouve ta progression sur tous tes appareils : choisis un nom de compte et un PIN,
-                    puis renseigne les mêmes sur l'autre appareil.
-                  </p>
-                  {!syncServerAvailable ? (
-                    <p className="text-[11px] font-mono p-2 rounded" style={{ color: TEXT_MUTED, border: `1px solid ${LINE}` }}>
-                      La synchronisation n'est pas activée sur cette installation.
-                    </p>
-                  ) : (
-                    <>
-                      <div className="grid grid-cols-2 gap-2">
-                        <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                          Compte
-                          <input
-                            value={syncSettings.account}
-                            onChange={(e) => setSyncSettings((s) => ({ ...s, account: e.target.value }))}
-                            placeholder="ex: alice"
-                            className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                            style={{ border: `1px solid ${LINE}`, color: TEXT }}
-                          />
-                        </label>
-                        <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-                          PIN (optionnel)
-                          <input
-                            type="password"
-                            value={syncSettings.pin}
-                            onChange={(e) => setSyncSettings((s) => ({ ...s, pin: e.target.value }))}
-                            className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
-                            style={{ border: `1px solid ${LINE}`, color: TEXT }}
-                          />
-                        </label>
-                      </div>
-                      <button
-                        onClick={syncNow}
-                        disabled={syncBusy || !syncSettings.account}
-                        className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 disabled:opacity-40"
-                        style={{ backgroundColor: AMBER, color: BG }}
-                      >
-                        <RefreshCw size={14} className={syncBusy ? "animate-spin" : ""} /> {syncBusy ? "Synchro…" : "Synchroniser maintenant"}
-                      </button>
-                      <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>{syncStatus}</p>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
       </div>
     </div>
   );
@@ -3008,6 +3317,7 @@ function BattleView({ ctx }) {
     codeInput, setCodeInput, runTests, codeAttempts, testResults,
     orderWork, moveLine, validateOrder, selectAnswer, dead, nextQuestion,
     askLocalHint, aiHint, aiBusy, aiError, clearAiHint,
+    aiSettings, authToken, access, hasPass, openModal,
   } = ctx;
   const mod = MODULES[activeIdx];
   const battleQuestions = getBattleQuestions(mod);
@@ -3072,31 +3382,48 @@ function BattleView({ ctx }) {
           </div>
         )}
 
-        {/* Coach IA local */}
-        <Frame accent="#8ECAE6" className="p-4 mb-4">
-          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>COACH IA LOCAL</p>
-              <button onClick={askLocalHint} disabled={aiBusy || answered} className="px-2 py-1 rounded-md font-mono text-[11px] disabled:opacity-50" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
-                {aiBusy ? "Analyse…" : "Demander un indice"}
-              </button>
-            </div>
-            <p className="text-xs leading-relaxed mb-2" style={{ color: TEXT_MUTED }}>
-              Indice progressif, sans donner la solution brute. Le modèle tourne sur ta machine.
-            </p>
-            {aiError && <p className="text-xs mb-2" style={{ color: DANGER }}>{aiError}</p>}
-            {aiHint && (
-              <MarkdownLite
-                text={aiHint}
-                className="text-xs leading-relaxed pr-1"
-                style={{ color: TEXT, maxHeight: 180, overflowY: "auto" }}
-              />
-            )}
-            {aiHint && !aiBusy && (
-              <button onClick={clearAiHint} className="mt-2 text-[11px] font-mono underline" style={{ color: TEXT_MUTED }}>Effacer l'indice</button>
-            )}
-          </div>
-        </Frame>
+        {/* Coach ADA — indice IA (réservé à l'accès complet sur le serveur FSQ) */}
+        {(() => {
+          const coachLocked = aiSettings.provider === "fsq-server" && !hasPass;
+          const hintsLeft = access ? Math.max(0, (access.aiDailyLimit || 0) - (access.aiUsedToday || 0)) : null;
+          return (
+            <Frame accent="#8ECAE6" className="p-4 mb-4">
+              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>⚡ COACH ADA — INDICE TACTIQUE</p>
+                  {coachLocked ? (
+                    <button onClick={() => openModal(authToken ? "pay" : "account")} className="px-2 py-1 rounded-md font-mono text-[11px] flex items-center gap-1" style={{ backgroundColor: AMBER, color: BG }}>
+                      <Unlock size={11} /> Débloquer
+                    </button>
+                  ) : (
+                    <button onClick={askLocalHint} disabled={aiBusy || answered} className="px-2 py-1 rounded-md font-mono text-[11px] disabled:opacity-50" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                      {aiBusy ? "ADA analyse…" : "Demander un indice"}
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs leading-relaxed mb-2" style={{ color: TEXT_MUTED }}>
+                  {coachLocked
+                    ? "Bloqué face au boss ? ADA analyse l'assaut en cours et te souffle la piste qui débloque — jamais la réponse toute faite. Inclus dans l'accès complet."
+                    : "ADA lit l'assaut en cours et te guide vers la solution sans jamais te la donner — tu gardes le mérite du coup final."}
+                  {!coachLocked && hasPass && hintsLeft !== null && (
+                    <span style={{ color: hintsLeft > 0 ? SUCCESS : DANGER }}> {hintsLeft > 0 ? `${hintsLeft} indice${hintsLeft > 1 ? "s" : ""} restant${hintsLeft > 1 ? "s" : ""} aujourd'hui.` : "Quota du jour épuisé — recharge demain."}</span>
+                  )}
+                </p>
+                {aiError && <p className="text-xs mb-2" style={{ color: DANGER }}>{aiError}</p>}
+                {aiHint && (
+                  <MarkdownLite
+                    text={aiHint}
+                    className="text-xs leading-relaxed pr-1"
+                    style={{ color: TEXT, maxHeight: 180, overflowY: "auto" }}
+                  />
+                )}
+                {aiHint && !aiBusy && (
+                  <button onClick={clearAiHint} className="mt-2 text-[11px] font-mono underline" style={{ color: TEXT_MUTED }}>Effacer l'indice</button>
+                )}
+              </div>
+            </Frame>
+          );
+        })()}
 
         {/* progression assauts */}
         <div className="flex items-center justify-between font-mono text-[11px] mb-2" style={{ color: TEXT_MUTED }}>
@@ -3396,23 +3723,39 @@ export default function FullstackQuest() {
       return AI_DEFAULT;
     }
   });
-  const [aiStatus, setAiStatus] = useState("En attente d'un serveur local.");
+  const [aiStatus, setAiStatus] = useState("Aucun indice demandé pour l'instant.");
   const [aiReady, setAiReady] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiHint, setAiHint] = useState("");
   const [aiError, setAiError] = useState("");
 
-  const [syncSettings, setSyncSettings] = useState(() => {
-    if (typeof window === "undefined") return SYNC_DEFAULT;
-    try {
-      const raw = window.localStorage.getItem(SYNC_SETTINGS_KEY);
-      return raw ? { ...SYNC_DEFAULT, ...JSON.parse(raw) } : SYNC_DEFAULT;
-    } catch {
-      return SYNC_DEFAULT;
-    }
+  // Compte joueur : JWT + dernier /auth/me connu (accès conservé hors-ligne).
+  const [authToken, setAuthToken] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try { return window.localStorage.getItem(AUTH_TOKEN_KEY) || ""; } catch { return ""; }
   });
-  const [syncStatus, setSyncStatus] = useState("Synchro non configurée.");
+  const [authUser, setAuthUser] = useState(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(AUTH_CACHE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  });
+  const [syncStatus, setSyncStatus] = useState("");
   const [syncBusy, setSyncBusy] = useState(false);
+
+  // Modales globales (menu ☰, compte, paiement) — au niveau racine pour être
+  // ouvrables depuis n'importe quelle vue, y compris en plein duel.
+  const [modal, setModal] = useState(null); // null | save | restore | account | pay
+  const [restoreError, setRestoreError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  // Paiement Mobile Money en cours (checkout + polling)
+  const [payPhone, setPayPhone] = useState("");
+  const [payBusy, setPayBusy] = useState(false);
+  const [payError, setPayError] = useState("");
+  const [payment, setPayment] = useState(null); // { paymentId, status, passExpiresAt? }
+  const payPollRef = useRef(0);
 
   // Daily Seeded Challenge
   const [dailySeed, setDailySeed] = useState(getTodaysSeed());
@@ -3447,20 +3790,27 @@ export default function FullstackQuest() {
         local = null;
       }
 
-      const sync = withSyncServer(syncSettings);
-      if (isSyncConfigured(sync)) {
-        setSyncStatus("Synchronisation…");
+      if (authToken) {
+        setSyncStatus("Synchronisation du compte…");
         try {
-          const remote = await syncProfileGet(sync);
+          const me = await apiJson("/api/v1/auth/me", { token: authToken });
+          setAuthUser(me);
+          const remote = await apiJson("/api/v1/me/profile", { token: authToken });
           const localTime = local?.updatedISO ? new Date(local.updatedISO).getTime() : 0;
           const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
           if (remote?.profile && remoteTime > localTime) {
             local = { ...FRESH, ...remote.profile };
             try { await window.storage.set(STORAGE_KEY, JSON.stringify(local)); } catch { /* le cache local est best-effort */ }
           }
-          setSyncStatus(`Synchronisé · compte "${syncSettings.account}"`);
+          setSyncStatus(`Compte synchronisé · ${me.user.displayName}`);
         } catch (e) {
-          setSyncStatus(`Sync indisponible: ${String(e?.message || e)}`);
+          if (e?.status === 401) {
+            setAuthToken("");
+            setAuthUser(null);
+            setSyncStatus("Session expirée — reconnecte-toi.");
+          } else {
+            setSyncStatus(`Compte hors-ligne: ${String(e?.message || e)}`);
+          }
         }
       }
 
@@ -3475,11 +3825,14 @@ export default function FullstackQuest() {
     try { return window.localStorage.getItem(ADMIN_KEY_STORAGE) || ""; } catch { return ""; }
   });
 
-  // Rafraîchit la banque depuis le serveur ; réutilisé au montage et après
-  // chaque action admin, pour voir les changements en jeu immédiatement.
+  // Rafraîchit la banque depuis le serveur ; réutilisé au montage, après chaque
+  // action admin, et quand le compte change (le serveur ne sert les questions
+  // des secteurs avancés qu'aux comptes dont le pass est actif).
   async function refreshBank() {
     try {
-      const res = await fetch(`${bankApiBase()}/api/v1/questions`);
+      const res = await fetch(`${bankApiBase()}/api/v1/questions`, {
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      });
       if (!res.ok) return false;
       const data = await res.json();
       if (!Array.isArray(data.questions)) return false;
@@ -3501,7 +3854,7 @@ export default function FullstackQuest() {
       }
     } catch { /* cache corrompu : on reste sur le statique */ }
     refreshBank();
-  }, []);
+  }, [authToken]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -3547,11 +3900,18 @@ export default function FullstackQuest() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      window.localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify(syncSettings));
-    } catch {
-      /* ignore */
-    }
-  }, [syncSettings]);
+      if (authToken) window.localStorage.setItem(AUTH_TOKEN_KEY, authToken);
+      else window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    } catch { /* ignore */ }
+  }, [authToken]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (authUser) window.localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(authUser));
+      else window.localStorage.removeItem(AUTH_CACHE_KEY);
+    } catch { /* ignore */ }
+  }, [authUser]);
 
   // Initialise l'état d'un défi pratique quand on arrive dessus
   useEffect(() => {
@@ -3570,32 +3930,71 @@ export default function FullstackQuest() {
     } catch {
       /* la progression reste en mémoire pour cette session même si la sauvegarde échoue */
     }
-    const sync = withSyncServer(syncSettings);
-    if (isSyncConfigured(sync)) {
-      syncProfilePut(sync, stamped)
-        .then(() => setSyncStatus(`Synchronisé · compte "${sync.account}"`))
+    if (authToken) {
+      apiJson("/api/v1/me/profile", { token: authToken, method: "PUT", body: { profile: stamped } })
+        .then(() => setSyncStatus(authUser ? `Compte synchronisé · ${authUser.user.displayName}` : "Progression synchronisée."))
         .catch((e) => setSyncStatus(`Échec de synchro: ${String(e?.message || e)}`));
     }
   }
 
-  async function syncNow() {
-    const sync = withSyncServer(syncSettings);
-    if (!isSyncConfigured(sync)) {
-      setSyncStatus("Choisis d'abord un nom de compte.");
-      return;
+  /* --- Compte joueur --------------------------------------------------- */
+
+  async function refreshMe() {
+    if (!authToken) return null;
+    try {
+      const me = await apiJson("/api/v1/auth/me", { token: authToken });
+      setAuthUser(me);
+      return me;
+    } catch (e) {
+      if (e?.status === 401) { setAuthToken(""); setAuthUser(null); }
+      return null;
     }
+  }
+
+  // mode: "login" | "register". Après connexion, adopte le profil le plus
+  // récent des deux côtés (même logique que l'ancien sync).
+  async function accountAuth(mode, fields) {
+    const path = mode === "login" ? "/api/v1/auth/login" : "/api/v1/auth/register";
+    const data = await apiJson(path, { method: "POST", body: fields });
+    setAuthToken(data.token);
+    setAuthUser({ user: data.user, access: data.access });
+    try {
+      const remote = await apiJson("/api/v1/me/profile", { token: data.token });
+      const localTime = profile?.updatedISO ? new Date(profile.updatedISO).getTime() : 0;
+      const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
+      if (remote?.profile && remoteTime > localTime) {
+        const adopted = withMigratedSrs({ ...FRESH, ...remote.profile });
+        setProfile(adopted);
+        try { await window.storage.set(STORAGE_KEY, JSON.stringify(adopted)); } catch { /* best-effort */ }
+      } else if (profile) {
+        await apiJson("/api/v1/me/profile", { token: data.token, method: "PUT", body: { profile } });
+      }
+      setSyncStatus(`Compte synchronisé · ${data.user.displayName}`);
+    } catch { /* la progression locale reste valable hors-ligne */ }
+    return data;
+  }
+
+  function accountLogout() {
+    setAuthToken("");
+    setAuthUser(null);
+    setSyncStatus("");
+  }
+
+  async function accountSyncNow() {
+    if (!authToken) return;
     setSyncBusy(true);
     try {
-      const remote = await syncProfileGet(sync);
+      const remote = await apiJson("/api/v1/me/profile", { token: authToken });
       const localTime = profile?.updatedISO ? new Date(profile.updatedISO).getTime() : 0;
       const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
       if (remote?.profile && remoteTime > localTime) {
         await persist(withMigratedSrs({ ...FRESH, ...remote.profile }));
-        setSyncStatus(`Version distante plus récente adoptée · compte "${sync.account}"`);
+        setSyncStatus("Version distante plus récente adoptée.");
       } else {
-        await syncProfilePut(sync, profile);
-        setSyncStatus(`Poussé vers le serveur · compte "${sync.account}"`);
+        await apiJson("/api/v1/me/profile", { token: authToken, method: "PUT", body: { profile } });
+        setSyncStatus("Progression poussée vers ton compte.");
       }
+      await refreshMe();
     } catch (e) {
       setSyncStatus(`Échec de synchro: ${String(e?.message || e)}`);
     } finally {
@@ -3603,13 +4002,88 @@ export default function FullstackQuest() {
     }
   }
 
+  /* --- Paiement du pass (PayMe : checkout puis polling) ------------------ */
+
+  async function startCheckout() {
+    setPayBusy(true);
+    setPayError("");
+    try {
+      const res = await apiJson("/api/v1/pay/checkout", { token: authToken, method: "POST", body: { phone: payPhone } });
+      setPayment({ paymentId: res.paymentId, status: res.status });
+      const pollId = ++payPollRef.current;
+      pollPayment(res.paymentId, pollId, 0);
+    } catch (e) {
+      setPayError(String(e?.message || e));
+    } finally {
+      setPayBusy(false);
+    }
+  }
+
+  async function pollPayment(id, pollId, attempt) {
+    if (payPollRef.current !== pollId) return; // un nouveau paiement a pris la main
+    if (attempt > 60) { // ~3 minutes
+      setPayment((p) => (p && p.paymentId === id ? { ...p, status: "TIMEOUT" } : p));
+      return;
+    }
+    try {
+      const res = await apiJson(`/api/v1/pay/${id}`, { token: authToken });
+      if (payPollRef.current !== pollId) return;
+      setPayment({ paymentId: id, status: res.status, passExpiresAt: res.passExpiresAt });
+      if (res.status === "PAID") {
+        try { SFX.victory(); } catch { /* silencieux */ }
+        await refreshMe();
+        refreshBank(); // les secteurs avancés arrivent avec le pass
+        return;
+      }
+      if (res.status === "FAILED" || res.status === "EXPIRED") return;
+    } catch { /* réseau : on retentera au prochain tick */ }
+    window.setTimeout(() => pollPayment(id, pollId, attempt + 1), 3000);
+  }
+
+  /* --- Modales globales --------------------------------------------------- */
+
+  function openModal(id) {
+    setRestoreError("");
+    setCopied(false);
+    setPayError("");
+    setModal(id);
+  }
+  const closeModal = () => setModal(null);
+
+  async function handleRestoreText() {
+    const ok = await importProgress();
+    if (ok) closeModal();
+    else setRestoreError("Sauvegarde invalide — vérifie le contenu collé.");
+  }
+
+  async function handleRestoreFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const ok = await importProgress(await file.text());
+    if (ok) closeModal();
+    else setRestoreError("Sauvegarde invalide — vérifie le fichier choisi.");
+  }
+
+  function copySave() {
+    navigator.clipboard?.writeText(JSON.stringify(profile, null, 2)).then(
+      () => setCopied(true),
+      () => setCopied(false)
+    );
+  }
+
   if (!profile) return <LoadingScreen />;
+
+  // Pass d'accès : source serveur (/auth/me), avec vérification locale de
+  // l'expiration pour que le verrou tienne aussi hors-ligne.
+  const access = authUser?.access || null;
+  const hasPass = !!(access?.hasPass && access?.passExpiresAt && new Date(access.passExpiresAt).getTime() > Date.now());
 
   function isUnlocked(idx) {
     if (idx === 0) return true;
     if (!profile.results[MODULES[idx - 1].id]?.passed) return false;
     const mod = MODULES[idx];
-    if (ADVANCED_TIER.includes(mod.id) && !profile.qualification?.passed) return false;
+    if (ADVANCED_TIER.includes(mod.id) && (!hasPass || !profile.qualification?.passed)) return false;
     return true;
   }
 
@@ -3713,9 +4187,10 @@ export default function FullstackQuest() {
   }
 
   // Épreuve Technique : exercice code/débogage d'un secteur, débloqué séparément.
+  // Réservée à l'accès complet (certification = valeur payante).
   function startTechnicalTrial(idx) {
     const mod = MODULES[idx];
-    if (!mod || !isTechnicalUnlocked(profile, mod)) return;
+    if (!hasPass || !mod || !isTechnicalUnlocked(profile, mod)) return;
     setActiveIdx(idx);
     const q = getTechnicalQuestions(mod)[0];
     setTechCodeInput(q?.starter || "");
@@ -3992,11 +4467,15 @@ export default function FullstackQuest() {
     setAiHint("");
 
     const prompt = buildLocalAIPrompt();
-    const result = await callAi(prompt, aiSettings);
+    const result = await callAi(prompt, aiSettings, authToken);
     if (result.ok) {
       setAiHint(result.text);
       setAiReady(true);
       setAiStatus(`Connecté à ${aiSettings.provider} · ${aiSettings.model}`);
+      // Reflète le quota consommé sans attendre le prochain /auth/me.
+      if (aiSettings.provider === "fsq-server" && authToken) {
+        setAuthUser((u) => (u?.access ? { ...u, access: { ...u.access, aiUsedToday: (u.access.aiUsedToday || 0) + 1 } } : u));
+      }
     } else {
       setAiReady(false);
       setAiStatus("Serveur local non joignable.");
@@ -4035,23 +4514,28 @@ export default function FullstackQuest() {
     toggleMilestone,
     qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, startQualificationExam, finishQualificationExam,
     techCodeInput, setTechCodeInput, techResults, startTechnicalTrial, runTechnicalTests,
-    syncSettings, setSyncSettings, syncStatus, syncBusy, syncNow,
-    syncServerAvailable: !!withSyncServer(syncSettings).serverUrl,
+    authToken, authUser, access, hasPass, accountAuth, accountLogout, accountSyncNow, refreshMe,
+    syncStatus, syncBusy,
+    modal, openModal, closeModal, restoreError, copied, copySave, handleRestoreText, handleRestoreFile,
+    payPhone, setPayPhone, payBusy, payError, payment, startCheckout,
     adminKey, setAdminKey, refreshBank, bankCount, exitAdmin,
   };
 
   /* ------------------------------ ROUTAGE ------------------------------ */
-  if (view === "admin") return <>{adminKey ? <AdminView ctx={ctx} /> : <AdminGateView ctx={ctx} />}<InstallPrompt /></>;
-  if (view === "codex") return <><CodexView ctx={ctx} /><InstallPrompt /></>;
-  if (view === "intro") return <><IntroView ctx={ctx} /><InstallPrompt /></>;
-  if (view === "battle") return <><BattleView ctx={ctx} /><InstallPrompt /></>;
-  if (view === "result") return <><ResultView ctx={ctx} /><InstallPrompt /></>;
-  if (view === "daily") return <><DailyView ctx={ctx} /><InstallPrompt /></>;
-  if (view === "srs") return <><SrsView ctx={ctx} /><InstallPrompt /></>;
-  if (view === "chantier") return <><ChantierView ctx={ctx} /><InstallPrompt /></>;
-  if (view === "qualification") return <><QualificationView ctx={ctx} /><InstallPrompt /></>;
-  if (view === "technical") return <><TechnicalView ctx={ctx} /><InstallPrompt /></>;
-  return <><MapView ctx={ctx} /><InstallPrompt /></>;
+  // ModalsHost rend les modales globales (sauvegarde, compte, paiement…)
+  // par-dessus la vue courante, quelle qu'elle soit.
+  const chrome = <><ModalsHost ctx={ctx} /><InstallPrompt /></>;
+  if (view === "admin") return <>{adminKey ? <AdminView ctx={ctx} /> : <AdminGateView ctx={ctx} />}{chrome}</>;
+  if (view === "codex") return <><CodexView ctx={ctx} />{chrome}</>;
+  if (view === "intro") return <><IntroView ctx={ctx} />{chrome}</>;
+  if (view === "battle") return <><BattleView ctx={ctx} />{chrome}</>;
+  if (view === "result") return <><ResultView ctx={ctx} />{chrome}</>;
+  if (view === "daily") return <><DailyView ctx={ctx} />{chrome}</>;
+  if (view === "srs") return <><SrsView ctx={ctx} />{chrome}</>;
+  if (view === "chantier") return <><ChantierView ctx={ctx} />{chrome}</>;
+  if (view === "qualification") return <><QualificationView ctx={ctx} />{chrome}</>;
+  if (view === "technical") return <><TechnicalView ctx={ctx} />{chrome}</>;
+  return <><MapView ctx={ctx} />{chrome}</>;
 }
 
 
