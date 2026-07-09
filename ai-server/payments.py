@@ -115,6 +115,27 @@ async def checkout(body: CheckoutIn, user: Dict[str, Any] = Depends(accounts.req
     return {"paymentId": str(payment["id"]), "status": "PROCESSING", "amount": amount, "currency": "XAF"}
 
 
+# --- Historique du joueur (doit être déclaré avant /pay/{payment_id} : sinon
+# "history" serait capturé comme un payment_id par la route dynamique) -----------
+
+@router.get("/api/v1/pay/history")
+async def payment_history(user: Dict[str, Any] = Depends(accounts.required_user)):
+    core.require_db()
+    pool = await core.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM payments WHERE user_id=$1 ORDER BY created_at DESC LIMIT 30", user["id"],
+        )
+    return {"payments": [
+        {
+            "id": str(r["id"]), "amount": int(r["amount"]), "currency": r["currency"], "status": r["status"],
+            "phone": r["customer_phone"], "createdAt": r["created_at"].isoformat(),
+            "finalizedAt": r["finalized_at"].isoformat() if r["finalized_at"] else None,
+        }
+        for r in rows
+    ]}
+
+
 # --- Statut (cible du polling front) -------------------------------------------
 
 @router.get("/api/v1/pay/{payment_id}")

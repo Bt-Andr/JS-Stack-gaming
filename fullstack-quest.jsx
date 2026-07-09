@@ -3048,7 +3048,7 @@ function ModalsHost({ ctx }) {
     exportProgress, copySave, copied,
     importText, setImportText, handleRestoreText, handleRestoreFile, restoreError,
     authToken, authUser, access, hasPass, accountLogout, accountSyncNow, syncStatus, syncBusy,
-    payPhone, setPayPhone, payBusy, payError, payment, startCheckout, recheckPayment,
+    payPhone, setPayPhone, payBusy, payError, payment, startCheckout, recheckPayment, paymentHistory,
     supportCategory, setSupportCategory, supportMessage, setSupportMessage, supportPaymentId,
     supportBusy, supportError, supportSent, supportTickets, openSupport, submitSupportTicket,
   } = ctx;
@@ -3151,6 +3151,36 @@ function ModalsHost({ ctx }) {
               <button onClick={accountLogout} className="mt-1 px-3 py-2 rounded-lg font-mono text-xs flex items-center justify-center gap-2" style={{ border: `1px solid ${DANGER}66`, color: DANGER }}>
                 <LogOut size={13} /> Se déconnecter de cet appareil
               </button>
+
+              {paymentHistory.length > 0 && (
+                <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${LINE}` }}>
+                  <p className="font-mono text-[10px] tracking-widest mb-1.5" style={{ color: TEXT_MUTED }}>HISTORIQUE DES PAIEMENTS</p>
+                  <div className="flex flex-col gap-1.5">
+                    {paymentHistory.map((p) => {
+                      const color = p.status === "PAID" ? SUCCESS : ["PENDING", "PROCESSING"].includes(p.status) ? AMBER : DANGER;
+                      const label = { PAID: "Réussi", PENDING: "En cours", PROCESSING: "En cours", FAILED: "Échoué", EXPIRED: "Expiré" }[p.status] || p.status;
+                      return (
+                        <div key={p.id} className="flex items-center justify-between gap-2 p-2 rounded-md text-xs" style={{ border: `1px solid ${LINE}` }}>
+                          <div className="min-w-0">
+                            <p style={{ color: TEXT }}>{p.amount.toLocaleString("fr-FR")} FCFA</p>
+                            <p className="text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                              {new Date(p.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ color, border: `1px solid ${color}` }}>{label}</span>
+                            {["FAILED", "EXPIRED"].includes(p.status) && (
+                              <button onClick={() => openSupport("paiement", p.id)} title="Signaler ce paiement" className="p-1 rounded" style={{ border: `1px solid ${LINE}` }}>
+                                <LifeBuoy size={11} style={{ color: TEXT_MUTED }} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <AccountAuthForm ctx={ctx} />
@@ -4092,6 +4122,15 @@ export default function FullstackQuest() {
   const [payError, setPayError] = useState("");
   const [payment, setPayment] = useState(null); // { paymentId, status, passExpiresAt? }
   const payPollRef = useRef(0);
+  const [paymentHistory, setPaymentHistory] = useState([]);
+
+  async function loadPaymentHistory() {
+    if (!authToken) return;
+    try {
+      const res = await apiJson("/api/v1/pay/history", { token: authToken });
+      setPaymentHistory(res.payments || []);
+    } catch { /* liste best-effort */ }
+  }
 
   // Support joueur (plaintes de paiement, bugs…) — voir aussi la console admin.
   const [supportCategory, setSupportCategory] = useState("paiement");
@@ -4440,6 +4479,7 @@ export default function FullstackQuest() {
     setCopied(false);
     setPayError("");
     setModal(id);
+    if (id === "account") loadPaymentHistory();
   }
   const closeModal = () => setModal(null);
 
@@ -4910,7 +4950,7 @@ export default function FullstackQuest() {
     authToken, authUser, access, hasPass, accountAuth, accountLogout, accountSyncNow, refreshMe,
     syncStatus, syncBusy,
     modal, openModal, closeModal, restoreError, copied, copySave, handleRestoreText, handleRestoreFile,
-    payPhone, setPayPhone, payBusy, payError, payment, startCheckout, recheckPayment,
+    payPhone, setPayPhone, payBusy, payError, payment, startCheckout, recheckPayment, paymentHistory,
     supportCategory, setSupportCategory, supportMessage, setSupportMessage, supportPaymentId,
     supportBusy, supportError, supportSent, supportTickets, openSupport, submitSupportTicket,
     adminKey, setAdminKey, refreshBank, bankCount, exitAdmin,
