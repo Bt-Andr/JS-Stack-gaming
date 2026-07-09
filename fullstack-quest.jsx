@@ -23,7 +23,7 @@ import {
   Lock, Check, ChevronRight, ArrowLeft, RotateCcw, Skull,
   Volume2, VolumeX, BookOpen, MessageSquareText,
   Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle, Hammer,
-  GraduationCap, Wrench, RefreshCw, Cloud, Plus, Trash2, Pencil, Database
+  GraduationCap, Wrench, RefreshCw, Cloud, Plus, Trash2, Pencil, Database, Swords
 } from "lucide-react";
 import {
   BG, PANEL, PANEL_SOFT, LINE, TEXT, TEXT_MUTED, AMBER, SUCCESS, DANGER,
