@@ -24,7 +24,7 @@ import {
   Volume2, VolumeX, BookOpen, MessageSquareText,
   Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle, Hammer,
   GraduationCap, Wrench, RefreshCw, Cloud, Plus, Trash2, Pencil, Database, Swords,
-  Menu, X, Download, Upload, Copy, User, LogOut, Smartphone, Unlock
+  Menu, X, Download, Upload, Copy, User, LogOut, Smartphone, Unlock, LifeBuoy
 } from "lucide-react";
 import {
   BG, PANEL, PANEL_SOFT, LINE, TEXT, TEXT_MUTED, AMBER, SUCCESS, DANGER,
@@ -1291,6 +1291,61 @@ function withMigratedSrs(profile) {
   return changed ? { ...profile, srsState } : profile;
 }
 
+// Fusion locale/serveur sans perte : toute la progression de ce jeu est
+// monotone (un module réussi le reste, l'XP ne baisse jamais, un badge ne se
+// retire pas) — donc prendre le max/l'union champ par champ ne peut jamais
+// effacer un gain, contrairement à "le blob le plus récent gagne" qui perd
+// tout le côté le plus vieux même s'il a des gains exclusifs (typiquement une
+// session jouée hors-ligne en PWA pendant que le compte progressait ailleurs).
+function mergeProfiles(a, b) {
+  a = a || FRESH;
+  b = b || FRESH;
+  const results = { ...a.results };
+  for (const [id, r] of Object.entries(b.results || {})) {
+    const cur = results[id];
+    results[id] = cur
+      ? { passed: !!cur.passed || !!r.passed, bestScore: Math.max(cur.bestScore || 0, r.bestScore || 0), flawless: !!cur.flawless || !!r.flawless }
+      : r;
+  }
+  const milestones = { ...(a.chantier?.milestones || {}) };
+  for (const [id, m] of Object.entries(b.chantier?.milestones || {})) {
+    const cur = milestones[id];
+    milestones[id] = cur
+      ? { done: !!cur.done || !!m.done, completedISO: cur.completedISO && m.completedISO ? (cur.completedISO < m.completedISO ? cur.completedISO : m.completedISO) : (cur.completedISO || m.completedISO || null) }
+      : m;
+  }
+  const srsState = { ...(a.srsState || {}) };
+  for (const [id, s] of Object.entries(b.srsState || {})) {
+    const cur = srsState[id];
+    srsState[id] = !cur || (s.reviews?.length || 0) > (cur.reviews?.length || 0) ? s : cur;
+  }
+  const dailyRuns = { ...(a.dailyRuns || {}) };
+  for (const [day, run] of Object.entries(b.dailyRuns || {})) {
+    const cur = dailyRuns[day];
+    dailyRuns[day] = !cur || (run.score || 0) > (cur.score || 0) ? run : cur;
+  }
+  return {
+    ...FRESH,
+    ...a,
+    ...b,
+    xp: Math.max(a.xp || 0, b.xp || 0),
+    bestCombo: Math.max(a.bestCombo || 0, b.bestCombo || 0),
+    badges: Array.from(new Set([...(a.badges || []), ...(b.badges || [])])),
+    lore: Array.from(new Set([...(a.lore || []), ...(b.lore || [])])),
+    results,
+    technical: { ...(a.technical || {}), ...(b.technical || {}) },
+    qualification: {
+      passed: !!a.qualification?.passed || !!b.qualification?.passed,
+      bestScore: Math.max(a.qualification?.bestScore || 0, b.qualification?.bestScore || 0),
+      attempts: Math.max(a.qualification?.attempts || 0, b.qualification?.attempts || 0),
+    },
+    chantier: { milestones },
+    srsState,
+    dailyRuns,
+    updatedISO: new Date().toISOString(),
+  };
+}
+
 const AI_SETTINGS_KEY = "fullstack-quest-ai-settings";
 // URL de ton ai-server déployé, injectée au build (Vercel: variable VITE_AI_SERVER_URL).
 const ENV_AI_SERVER_URL =
@@ -2024,6 +2079,74 @@ function AdminView({ ctx }) {
   const [settingsMsg, setSettingsMsg] = useState("");
   const [settingsBusy, setSettingsBusy] = useState(false);
 
+  // Paiements : traçabilité pour instruire une plainte ("j'ai payé mais rien ne s'est débloqué").
+  const [payments, setPayments] = useState([]);
+  const [paymentsBusy, setPaymentsBusy] = useState(false);
+  const [paymentFilterEmail, setPaymentFilterEmail] = useState("");
+  const [paymentFilterStatus, setPaymentFilterStatus] = useState("");
+  const [paymentDetail, setPaymentDetail] = useState(null);
+
+  async function loadPayments() {
+    setPaymentsBusy(true);
+    try {
+      const qs = new URLSearchParams();
+      if (paymentFilterEmail.trim()) qs.set("email", paymentFilterEmail.trim());
+      if (paymentFilterStatus) qs.set("status", paymentFilterStatus);
+      const q = qs.toString();
+      const data = await adminFetch(`/api/v1/admin/payments${q ? `?${q}` : ""}`, adminKey);
+      setPayments(data.payments || []);
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setPaymentsBusy(false);
+    }
+  }
+
+  async function loadPaymentDetail(id) {
+    setPaymentDetail(null);
+    try {
+      setPaymentDetail(await adminFetch(`/api/v1/admin/payments/${id}`, adminKey));
+    } catch (e) {
+      setError(String(e?.message || e));
+    }
+  }
+
+  // Support : plaintes des joueurs, potentiellement liées à un paiement ci-dessus.
+  const [tickets, setTickets] = useState([]);
+  const [ticketsBusy, setTicketsBusy] = useState(false);
+  const [ticketFilterStatus, setTicketFilterStatus] = useState("open");
+  const [ticketDrafts, setTicketDrafts] = useState({});
+
+  async function loadTickets() {
+    setTicketsBusy(true);
+    try {
+      const q = ticketFilterStatus ? `?status=${ticketFilterStatus}` : "";
+      const data = await adminFetch(`/api/v1/admin/support/tickets${q}`, adminKey);
+      setTickets(data.tickets || []);
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setTicketsBusy(false);
+    }
+  }
+
+  async function saveTicket(id, patch) {
+    try {
+      await adminFetch(`/api/v1/admin/support/tickets/${id}`, adminKey, { method: "PATCH", body: JSON.stringify(patch) });
+      loadTickets();
+    } catch (e) {
+      setError(String(e?.message || e));
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "payments") loadPayments();
+    if (tab === "support") loadTickets();
+  }, [tab]);
+  // Le badge "Support (N)" du bandeau d'onglets doit rester à jour même sans
+  // avoir ouvert l'onglet — un admin doit voir qu'il y a des plaintes en attente.
+  useEffect(() => { loadTickets(); }, []);
+
   useEffect(() => {
     if (tab !== "settings") return;
     (async () => {
@@ -2232,6 +2355,12 @@ function AdminView({ ctx }) {
             </button>
             <button onClick={() => setTab("settings")} className="px-3 py-1.5 rounded-lg font-mono text-xs flex items-center gap-1" style={{ backgroundColor: tab === "settings" ? AMBER : PANEL_SOFT, color: tab === "settings" ? BG : TEXT, border: `1px solid ${tab === "settings" ? AMBER : LINE}` }}>
               <Wrench size={12} /> Réglages
+            </button>
+            <button onClick={() => setTab("payments")} className="px-3 py-1.5 rounded-lg font-mono text-xs flex items-center gap-1" style={{ backgroundColor: tab === "payments" ? AMBER : PANEL_SOFT, color: tab === "payments" ? BG : TEXT, border: `1px solid ${tab === "payments" ? AMBER : LINE}` }}>
+              <Smartphone size={12} /> Paiements
+            </button>
+            <button onClick={() => setTab("support")} className="px-3 py-1.5 rounded-lg font-mono text-xs flex items-center gap-1" style={{ backgroundColor: tab === "support" ? AMBER : PANEL_SOFT, color: tab === "support" ? BG : TEXT, border: `1px solid ${tab === "support" ? AMBER : LINE}` }}>
+              <LifeBuoy size={12} /> Support{tickets.filter((t) => t.status === "open").length > 0 ? ` (${tickets.filter((t) => t.status === "open").length})` : ""}
             </button>
           </div>
         </div>
@@ -2527,6 +2656,117 @@ function AdminView({ ctx }) {
               </div>
             </Frame>
           </div>
+        ) : tab === "payments" ? (
+          <div className="flex flex-col gap-4">
+            <div className="flex gap-2 flex-wrap">
+              <input value={paymentFilterEmail} onChange={(e) => setPaymentFilterEmail(e.target.value)} placeholder="Filtrer par email" className="flex-1 min-w-[160px] px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
+              <select value={paymentFilterStatus} onChange={(e) => setPaymentFilterStatus(e.target.value)} className="px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={selectStyle}>
+                <option style={optStyle} value="">Tous statuts</option>
+                {["PENDING", "PAID", "FAILED", "EXPIRED"].map((s) => <option style={optStyle} key={s} value={s}>{s}</option>)}
+              </select>
+              <button onClick={loadPayments} className="px-2 py-1.5 rounded-md font-mono text-xs" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                <RefreshCw size={12} className={paymentsBusy ? "animate-spin" : ""} />
+              </button>
+            </div>
+
+            {payments.length === 0 && !paymentsBusy && (
+              <p className="text-xs font-mono" style={{ color: TEXT_MUTED }}>Aucun paiement pour ces filtres.</p>
+            )}
+            <div className="flex flex-col gap-2">
+              {payments.map((p) => (
+                <button key={p.id} onClick={() => loadPaymentDetail(p.id)} className="p-3 rounded-lg flex items-center gap-3 text-left hover:opacity-90" style={{ backgroundColor: PANEL, border: `1px solid ${LINE}` }}>
+                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded shrink-0" style={{ color: p.status === "PAID" ? SUCCESS : p.status === "PENDING" ? AMBER : DANGER, border: `1px solid ${p.status === "PAID" ? SUCCESS : p.status === "PENDING" ? AMBER : DANGER}` }}>
+                    {p.status}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs truncate" style={{ color: TEXT }}>{p.email} · {p.displayName}</p>
+                    <p className="text-[10px] font-mono" style={{ color: TEXT_MUTED }}>{p.amount} {p.currency} · {p.phone || "—"} · {new Date(p.createdAt).toLocaleString("fr-FR")}</p>
+                  </div>
+                  <ChevronRight size={14} style={{ color: TEXT_MUTED }} />
+                </button>
+              ))}
+            </div>
+
+            {paymentDetail && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(3,12,24,0.78)" }} onClick={() => setPaymentDetail(null)}>
+                <div className="w-full max-w-md rounded-xl p-5 max-h-[85vh] overflow-y-auto" style={{ backgroundColor: PANEL, border: `1px solid ${LINE}` }} onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="font-mono text-xs font-bold" style={{ color: TEXT }}>{paymentDetail.email}</p>
+                    <button onClick={() => setPaymentDetail(null)} className="w-7 h-7 rounded-md flex items-center justify-center" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}><X size={13} /></button>
+                  </div>
+                  <p className="text-xs font-mono mb-1" style={{ color: TEXT_MUTED }}>{paymentDetail.amount} {paymentDetail.currency} · {paymentDetail.phone || "—"} · réf {paymentDetail.providerRef || "—"}</p>
+                  <p className="text-[10px] font-mono mb-3" style={{ color: TEXT_MUTED }}>id {paymentDetail.id}</p>
+
+                  <p className="font-mono text-[10px] tracking-widest mb-1" style={{ color: TEXT_MUTED }}>HISTORIQUE</p>
+                  <div className="flex flex-col gap-1.5 mb-4">
+                    {paymentDetail.events.map((e, i) => (
+                      <div key={i} className="text-xs p-2 rounded" style={{ border: `1px solid ${LINE}` }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-[10px]" style={{ color: AMBER }}>{e.status}</span>
+                          <span className="font-mono text-[9px]" style={{ color: TEXT_MUTED }}>{new Date(e.createdAt).toLocaleString("fr-FR")}</span>
+                        </div>
+                        {e.detail && <p className="mt-0.5" style={{ color: TEXT_MUTED }}>{e.detail}</p>}
+                      </div>
+                    ))}
+                  </div>
+
+                  {paymentDetail.gatewayTransaction && (
+                    <>
+                      <p className="font-mono text-[10px] tracking-widest mb-1" style={{ color: TEXT_MUTED }}>PASSERELLE</p>
+                      <div className="text-xs p-2 rounded" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
+                        <p>ref {paymentDetail.gatewayTransaction.gatewayReference || "—"} · statut provider {paymentDetail.gatewayTransaction.providerStatus || "—"}</p>
+                        {paymentDetail.gatewayTransaction.failureReason && <p className="mt-1" style={{ color: DANGER }}>{paymentDetail.gatewayTransaction.failureReason}</p>}
+                        {paymentDetail.gatewayTransaction.lastPolledAt && <p className="mt-1">dernier sondage {new Date(paymentDetail.gatewayTransaction.lastPolledAt).toLocaleString("fr-FR")}</p>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : tab === "support" ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex gap-2">
+              <select value={ticketFilterStatus} onChange={(e) => setTicketFilterStatus(e.target.value)} className="px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={selectStyle}>
+                <option style={optStyle} value="">Tous statuts</option>
+                {["open", "in_progress", "resolved", "closed"].map((s) => <option style={optStyle} key={s} value={s}>{s}</option>)}
+              </select>
+              <button onClick={loadTickets} className="px-2 py-1.5 rounded-md font-mono text-xs" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                <RefreshCw size={12} className={ticketsBusy ? "animate-spin" : ""} />
+              </button>
+            </div>
+
+            {tickets.length === 0 && !ticketsBusy && (
+              <p className="text-xs font-mono" style={{ color: TEXT_MUTED }}>Aucun ticket pour ce filtre.</p>
+            )}
+            {tickets.map((t) => {
+              const draft = ticketDrafts[t.id] || { status: t.status, adminNote: t.adminNote || "" };
+              const setDraft = (patch) => setTicketDrafts((d) => ({ ...d, [t.id]: { ...draft, ...patch } }));
+              return (
+                <div key={t.id} className="p-3 rounded-lg" style={{ backgroundColor: PANEL, border: `1px solid ${t.status === "open" ? AMBER : LINE}` }}>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-xs" style={{ color: TEXT }}>{t.email} · <span style={{ color: TEXT_MUTED }}>{t.category}</span></p>
+                    <span className="font-mono text-[9px]" style={{ color: TEXT_MUTED }}>{new Date(t.createdAt).toLocaleString("fr-FR")}</span>
+                  </div>
+                  <p className="text-xs mb-2" style={{ color: TEXT }}>{t.message}</p>
+                  {t.paymentId && (
+                    <button onClick={() => { setTab("payments"); loadPaymentDetail(t.paymentId); }} className="text-[10px] font-mono underline mb-2" style={{ color: "#8ECAE6" }}>
+                      Voir le paiement lié →
+                    </button>
+                  )}
+                  <div className="flex gap-2 items-center">
+                    <select value={draft.status} onChange={(e) => setDraft({ status: e.target.value })} className="px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={selectStyle}>
+                      {["open", "in_progress", "resolved", "closed"].map((s) => <option style={optStyle} key={s} value={s}>{s}</option>)}
+                    </select>
+                    <input value={draft.adminNote} onChange={(e) => setDraft({ adminNote: e.target.value })} placeholder="Note interne / réponse" className="flex-1 px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
+                    <button onClick={() => saveTicket(t.id, draft)} className="px-2 py-1.5 rounded-md font-mono text-xs" style={{ backgroundColor: AMBER, color: BG }}>
+                      OK
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <Frame accent={AMBER} className="p-4">
             <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm flex flex-col gap-3">
@@ -2808,15 +3048,20 @@ function ModalsHost({ ctx }) {
     exportProgress, copySave, copied,
     importText, setImportText, handleRestoreText, handleRestoreFile, restoreError,
     authToken, authUser, access, hasPass, accountLogout, accountSyncNow, syncStatus, syncBusy,
-    payPhone, setPayPhone, payBusy, payError, payment, startCheckout,
+    payPhone, setPayPhone, payBusy, payError, payment, startCheckout, recheckPayment,
+    supportCategory, setSupportCategory, supportMessage, setSupportMessage, supportPaymentId,
+    supportBusy, supportError, supportSent, supportTickets, openSupport, submitSupportTicket,
   } = ctx;
   if (!modal) return null;
 
   const passPrice = access?.passPriceXaf ?? 1500;
   const passDays = access?.passDays ?? 30;
   const fmtDate = (iso) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
-  const titles = { save: "SAUVEGARDER", restore: "RESTAURER", account: "COMPTE", pay: "ACCÈS COMPLET" };
-  const payFailed = payment && ["FAILED", "EXPIRED", "TIMEOUT"].includes(payment.status);
+  const fmtDateTime = (iso) => new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const titles = { save: "SAUVEGARDER", restore: "RESTAURER", account: "COMPTE", pay: "ACCÈS COMPLET", support: "SUPPORT" };
+  const payDeclined = payment && ["FAILED", "EXPIRED"].includes(payment.status);
+  const payTimedOut = payment && payment.status === "TIMEOUT";
+  const TICKET_STATUS_LABEL = { open: "Ouvert", in_progress: "En cours", resolved: "Résolu", closed: "Fermé" };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(3,12,24,0.78)" }} onClick={closeModal}>
@@ -2827,6 +3072,7 @@ function ModalsHost({ ctx }) {
             {modal === "restore" && <Upload size={14} style={{ color: AMBER }} />}
             {modal === "account" && <User size={14} style={{ color: "#8ECAE6" }} />}
             {modal === "pay" && <Unlock size={14} style={{ color: AMBER }} />}
+            {modal === "support" && <LifeBuoy size={14} style={{ color: "#8ECAE6" }} />}
             <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>{titles[modal]}</p>
           </div>
           <button onClick={closeModal} title="Fermer" className="w-7 h-7 rounded-md flex items-center justify-center" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
@@ -2941,6 +3187,24 @@ function ModalsHost({ ctx }) {
                 l'accès s'activera ici automatiquement.
               </p>
             </div>
+          ) : payTimedOut ? (
+            <div className="flex flex-col gap-3 text-center py-3">
+              <Hourglass size={26} className="mx-auto" style={{ color: AMBER }} />
+              <p className="font-mono text-sm font-bold">Toujours en attente de confirmation</p>
+              <p className="text-xs leading-relaxed" style={{ color: TEXT_MUTED }}>
+                PayMe n'a pas encore renvoyé de statut final après plusieurs minutes. Le paiement peut quand même
+                aboutir de son côté — vérifie maintenant, ou ferme cette fenêtre : l'accès s'active tout seul dès
+                que la confirmation arrive, même en arrière-plan.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={recheckPayment} className="flex-1 px-3 py-2 rounded-lg font-mono text-xs flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
+                  <RefreshCw size={13} /> Vérifier maintenant
+                </button>
+                <button onClick={() => openSupport("paiement", payment.paymentId)} className="flex-1 px-3 py-2 rounded-lg font-mono text-xs flex items-center justify-center gap-2" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+                  <LifeBuoy size={13} /> Signaler
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="flex flex-col gap-2">
               <p className="text-xs leading-relaxed" style={{ color: TEXT_MUTED }}>
@@ -2964,14 +3228,84 @@ function ModalsHost({ ctx }) {
               <button onClick={startCheckout} disabled={payBusy || !payPhone.trim()} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: AMBER, color: BG }}>
                 <Smartphone size={14} /> {payBusy ? "Initialisation…" : "Payer par Mobile Money"}
               </button>
-              {payFailed && (
-                <p className="text-[11px] font-mono" style={{ color: DANGER }}>
-                  {payment.status === "FAILED" ? "Paiement refusé ou annulé — vérifie ton solde et réessaie." : "La demande a expiré sans confirmation — réessaie."}
-                </p>
+              {payDeclined && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-[11px] font-mono" style={{ color: DANGER }}>
+                    {payment.status === "FAILED" ? "Paiement refusé ou annulé — vérifie ton solde et réessaie." : "La demande a expiré sans confirmation — réessaie."}
+                  </p>
+                  <button onClick={() => openSupport("paiement", payment.paymentId)} className="self-start text-[11px] font-mono underline flex items-center gap-1" style={{ color: TEXT_MUTED }}>
+                    <LifeBuoy size={11} /> L'argent a été débité chez toi ? Signale-le au support
+                  </button>
+                </div>
               )}
               {payError && <p className="text-[11px] font-mono" style={{ color: DANGER }}>{payError}</p>}
             </div>
           )
+        )}
+
+        {modal === "support" && (
+          <div className="flex flex-col gap-3">
+            {supportSent && (
+              <p className="text-xs font-mono p-2 rounded" style={{ color: SUCCESS, backgroundColor: `${SUCCESS}14`, border: `1px solid ${SUCCESS}` }}>
+                Ticket envoyé — on te répond ici même dès que possible.
+              </p>
+            )}
+            <div className="flex flex-col gap-2">
+              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                Catégorie
+                <select
+                  value={supportCategory}
+                  onChange={(e) => setSupportCategory(e.target.value)}
+                  className="px-2 py-2 rounded-md bg-transparent focus:outline-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                >
+                  <option value="paiement" style={{ color: BG }}>Paiement / abonnement</option>
+                  <option value="compte" style={{ color: BG }}>Compte</option>
+                  <option value="bug" style={{ color: BG }}>Bug</option>
+                  <option value="autre" style={{ color: BG }}>Autre</option>
+                </select>
+              </label>
+              {supportPaymentId && (
+                <p className="text-[10px] font-mono" style={{ color: TEXT_MUTED }}>Lié au paiement <span className="font-bold">{supportPaymentId.slice(0, 8)}</span>.</p>
+              )}
+              <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+                Décris le problème
+                <textarea
+                  value={supportMessage}
+                  onChange={(e) => setSupportMessage(e.target.value)}
+                  rows={4}
+                  placeholder="J'ai payé mais l'accès complet ne s'est pas débloqué…"
+                  className="px-3 py-2 rounded-md font-mono text-sm bg-transparent focus:outline-none resize-none"
+                  style={{ border: `1px solid ${LINE}`, color: TEXT }}
+                />
+              </label>
+              <button onClick={submitSupportTicket} disabled={supportBusy || !supportMessage.trim() || !authToken} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: AMBER, color: BG }}>
+                <LifeBuoy size={14} /> {supportBusy ? "Envoi…" : "Envoyer au support"}
+              </button>
+              {!authToken && <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>Connecte-toi pour envoyer un ticket suivi.</p>}
+              {supportError && <p className="text-[11px] font-mono" style={{ color: DANGER }}>{supportError}</p>}
+            </div>
+
+            {supportTickets.length > 0 && (
+              <div className="flex flex-col gap-2 pt-2" style={{ borderTop: `1px solid ${LINE}` }}>
+                <p className="font-mono text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>TES TICKETS</p>
+                {supportTickets.map((t) => (
+                  <div key={t.id} className="p-2 rounded-md text-xs" style={{ border: `1px solid ${LINE}` }}>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="font-mono text-[10px]" style={{ color: TEXT_MUTED }}>{fmtDateTime(t.createdAt)} · {t.category}</span>
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ color: t.status === "resolved" || t.status === "closed" ? SUCCESS : AMBER, border: `1px solid ${t.status === "resolved" || t.status === "closed" ? SUCCESS : AMBER}` }}>
+                        {TICKET_STATUS_LABEL[t.status] || t.status}
+                      </span>
+                    </div>
+                    <p style={{ color: TEXT }}>{t.message}</p>
+                    {t.adminNote && (
+                      <p className="mt-1 pt-1 text-[11px]" style={{ color: TEXT_MUTED, borderTop: `1px solid ${LINE}` }}>↳ {t.adminNote}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -2984,7 +3318,7 @@ function MapView({ ctx }) {
     profile, soundOn, setSoundOn, setView, adaGreet, completedCount, levelInfo,
     badgeCount, isUnlocked, nextIdx, startModule, confirmReset, setConfirmReset, resetProgress,
     startDailyChallenge, startSrsSession, startQualificationExam, startTechnicalTrial,
-    authToken, authUser, access, hasPass, openModal,
+    authToken, authUser, access, hasPass, openModal, openSupport,
   } = ctx;
   const qualified = !!profile.qualification?.passed;
   const chantierUnlocked = hasPass && qualified && completedCount >= Math.ceil(MODULES.length / 2);
@@ -2997,7 +3331,8 @@ function MapView({ ctx }) {
   const [menuOpen, setMenuOpen] = useState(false);
   function openFromMenu(id) {
     setMenuOpen(false);
-    openModal(id);
+    if (id === "support") openSupport("autre", null);
+    else openModal(id);
   }
   return (
     <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
@@ -3031,6 +3366,7 @@ function MapView({ ctx }) {
                         { id: "account", Icon: User, label: authUser ? authUser.user.displayName : "Compte" },
                         { id: "save", Icon: Download, label: "Sauvegarder" },
                         { id: "restore", Icon: Upload, label: "Restaurer" },
+                        { id: "support", Icon: LifeBuoy, label: "Support" },
                       ].map(({ id, Icon, label }) => (
                         <button key={id} onClick={() => openFromMenu(id)} className="w-full flex items-center gap-2 px-3 py-2 font-mono text-xs text-left hover:opacity-80" style={{ color: TEXT }}>
                           <Icon size={13} style={{ color: id === "account" && hasPass ? SUCCESS : TEXT_MUTED }} /> <span className="truncate">{label}</span>
@@ -3746,7 +4082,7 @@ export default function FullstackQuest() {
 
   // Modales globales (menu ☰, compte, paiement) — au niveau racine pour être
   // ouvrables depuis n'importe quelle vue, y compris en plein duel.
-  const [modal, setModal] = useState(null); // null | save | restore | account | pay
+  const [modal, setModal] = useState(null); // null | save | restore | account | pay | support
   const [restoreError, setRestoreError] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -3756,6 +4092,15 @@ export default function FullstackQuest() {
   const [payError, setPayError] = useState("");
   const [payment, setPayment] = useState(null); // { paymentId, status, passExpiresAt? }
   const payPollRef = useRef(0);
+
+  // Support joueur (plaintes de paiement, bugs…) — voir aussi la console admin.
+  const [supportCategory, setSupportCategory] = useState("paiement");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportPaymentId, setSupportPaymentId] = useState(null);
+  const [supportBusy, setSupportBusy] = useState(false);
+  const [supportError, setSupportError] = useState("");
+  const [supportSent, setSupportSent] = useState(false);
+  const [supportTickets, setSupportTickets] = useState([]);
 
   // Daily Seeded Challenge
   const [dailySeed, setDailySeed] = useState(getTodaysSeed());
@@ -3796,11 +4141,12 @@ export default function FullstackQuest() {
           const me = await apiJson("/api/v1/auth/me", { token: authToken });
           setAuthUser(me);
           const remote = await apiJson("/api/v1/me/profile", { token: authToken });
-          const localTime = local?.updatedISO ? new Date(local.updatedISO).getTime() : 0;
-          const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
-          if (remote?.profile && remoteTime > localTime) {
-            local = { ...FRESH, ...remote.profile };
+          if (remote?.profile) {
+            local = withMigratedSrs(mergeProfiles(local, remote.profile));
             try { await window.storage.set(STORAGE_KEY, JSON.stringify(local)); } catch { /* le cache local est best-effort */ }
+            // Renvoie la fusion au serveur : si la session hors-ligne avait de
+            // l'avance, le compte doit en hériter, pas seulement cet appareil.
+            apiJson("/api/v1/me/profile", { token: authToken, method: "PUT", body: { profile: local } }).catch(() => {});
           }
           setSyncStatus(`Compte synchronisé · ${me.user.displayName}`);
         } catch (e) {
@@ -3960,15 +4306,10 @@ export default function FullstackQuest() {
     setAuthUser({ user: data.user, access: data.access });
     try {
       const remote = await apiJson("/api/v1/me/profile", { token: data.token });
-      const localTime = profile?.updatedISO ? new Date(profile.updatedISO).getTime() : 0;
-      const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
-      if (remote?.profile && remoteTime > localTime) {
-        const adopted = withMigratedSrs({ ...FRESH, ...remote.profile });
-        setProfile(adopted);
-        try { await window.storage.set(STORAGE_KEY, JSON.stringify(adopted)); } catch { /* best-effort */ }
-      } else if (profile) {
-        await apiJson("/api/v1/me/profile", { token: data.token, method: "PUT", body: { profile } });
-      }
+      const merged = withMigratedSrs(mergeProfiles(profile, remote?.profile));
+      setProfile(merged);
+      try { await window.storage.set(STORAGE_KEY, JSON.stringify(merged)); } catch { /* best-effort */ }
+      await apiJson("/api/v1/me/profile", { token: data.token, method: "PUT", body: { profile: merged } });
       setSyncStatus(`Compte synchronisé · ${data.user.displayName}`);
     } catch { /* la progression locale reste valable hors-ligne */ }
     return data;
@@ -3985,15 +4326,9 @@ export default function FullstackQuest() {
     setSyncBusy(true);
     try {
       const remote = await apiJson("/api/v1/me/profile", { token: authToken });
-      const localTime = profile?.updatedISO ? new Date(profile.updatedISO).getTime() : 0;
-      const remoteTime = remote?.updatedISO ? new Date(remote.updatedISO).getTime() : 0;
-      if (remote?.profile && remoteTime > localTime) {
-        await persist(withMigratedSrs({ ...FRESH, ...remote.profile }));
-        setSyncStatus("Version distante plus récente adoptée.");
-      } else {
-        await apiJson("/api/v1/me/profile", { token: authToken, method: "PUT", body: { profile } });
-        setSyncStatus("Progression poussée vers ton compte.");
-      }
+      const merged = withMigratedSrs(mergeProfiles(profile, remote?.profile));
+      await persist(merged);
+      setSyncStatus("Progression fusionnée avec le compte.");
       await refreshMe();
     } catch (e) {
       setSyncStatus(`Échec de synchro: ${String(e?.message || e)}`);
@@ -4001,6 +4336,15 @@ export default function FullstackQuest() {
       setSyncBusy(false);
     }
   }
+
+  // Retour de connexion (PWA hors-ligne puis réseau qui revient) : refait la
+  // même fusion sans perte, pour que rien de joué hors-ligne ne soit écrasé.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onOnline = () => { accountSyncNow(); };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [authToken, profile]);
 
   /* --- Paiement du pass (PayMe : checkout puis polling) ------------------ */
 
@@ -4038,6 +4382,55 @@ export default function FullstackQuest() {
       if (res.status === "FAILED" || res.status === "EXPIRED") return;
     } catch { /* réseau : on retentera au prochain tick */ }
     window.setTimeout(() => pollPayment(id, pollId, attempt + 1), 3000);
+  }
+
+  // Bouton "Vérifier maintenant" après un TIMEOUT : redémarre le polling sans
+  // relancer de checkout (le paiement PayMe est peut-être arrivé entre-temps).
+  function recheckPayment() {
+    if (!payment) return;
+    const pollId = ++payPollRef.current;
+    setPayment((p) => ({ ...p, status: "PROCESSING" }));
+    pollPayment(payment.paymentId, pollId, 0);
+  }
+
+  /* --- Support (plaintes de paiement, bugs…) ------------------------------ */
+
+  async function loadSupportTickets() {
+    if (!authToken) return;
+    try {
+      const res = await apiJson("/api/v1/support/tickets", { token: authToken });
+      setSupportTickets(res.tickets || []);
+    } catch { /* liste best-effort */ }
+  }
+
+  function openSupport(category, paymentId) {
+    setSupportCategory(category || "paiement");
+    setSupportPaymentId(paymentId || null);
+    setSupportMessage("");
+    setSupportError("");
+    setSupportSent(false);
+    setModal("support");
+    loadSupportTickets();
+  }
+
+  async function submitSupportTicket() {
+    if (!supportMessage.trim()) return;
+    setSupportBusy(true);
+    setSupportError("");
+    try {
+      await apiJson("/api/v1/support/tickets", {
+        token: authToken,
+        method: "POST",
+        body: { category: supportCategory, message: supportMessage.trim(), paymentId: supportPaymentId || undefined },
+      });
+      setSupportMessage("");
+      setSupportSent(true);
+      await loadSupportTickets();
+    } catch (e) {
+      setSupportError(String(e?.message || e));
+    } finally {
+      setSupportBusy(false);
+    }
   }
 
   /* --- Modales globales --------------------------------------------------- */
@@ -4517,7 +4910,9 @@ export default function FullstackQuest() {
     authToken, authUser, access, hasPass, accountAuth, accountLogout, accountSyncNow, refreshMe,
     syncStatus, syncBusy,
     modal, openModal, closeModal, restoreError, copied, copySave, handleRestoreText, handleRestoreFile,
-    payPhone, setPayPhone, payBusy, payError, payment, startCheckout,
+    payPhone, setPayPhone, payBusy, payError, payment, startCheckout, recheckPayment,
+    supportCategory, setSupportCategory, supportMessage, setSupportMessage, supportPaymentId,
+    supportBusy, supportError, supportSent, supportTickets, openSupport, submitSupportTicket,
     adminKey, setAdminKey, refreshBank, bankCount, exitAdmin,
   };
 

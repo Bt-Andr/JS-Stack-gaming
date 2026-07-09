@@ -39,6 +39,15 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+async def _log_event(conn, payment_id: uuid.UUID, status: str, detail: Optional[str] = None) -> None:
+    """Trace horodatée des transitions d'un paiement — consultée depuis l'admin
+    en cas de plainte ('j'ai payé mais rien ne s'est débloqué')."""
+    await conn.execute(
+        "INSERT INTO payment_events (payment_id, status, detail) VALUES ($1, $2, $3)",
+        payment_id, status, (detail or "")[:500] or None,
+    )
+
+
 # --- Checkout -----------------------------------------------------------------
 
 class CheckoutIn(BaseModel):
@@ -67,6 +76,7 @@ async def checkout(body: CheckoutIn, user: Dict[str, Any] = Depends(accounts.req
             "VALUES ('PAYME', $1, $2, $3, $4, 100)",
             payment["id"], local_ref, phone, amount,
         )
+        await _log_event(conn, payment["id"], "PENDING", f"Checkout initié par le joueur ({phone}).")
 
     if SANDBOX:
         gateway_ref = f"SANDBOX-{local_ref}"
@@ -77,6 +87,7 @@ async def checkout(body: CheckoutIn, user: Dict[str, Any] = Depends(accounts.req
                 local_ref, gateway_ref,
             )
             await conn.execute("UPDATE payments SET provider_ref=$2 WHERE id=$1", payment["id"], gateway_ref)
+            await _log_event(conn, payment["id"], "PROCESSING", "Bac à sable : succès automatique programmé.")
         return {"paymentId": str(payment["id"]), "status": "PROCESSING", "amount": amount, "currency": "XAF", "sandbox": True}
 
     config, token = await payme.get_valid_token()
@@ -89,6 +100,7 @@ async def checkout(body: CheckoutIn, user: Dict[str, Any] = Depends(accounts.req
                 local_ref, str(e.detail)[:500],
             )
             await conn.execute("UPDATE payments SET status='FAILED', finalized_at=now() WHERE id=$1", payment["id"])
+            await _log_event(conn, payment["id"], "FAILED", f"Échec à l'initiation: {e.detail}")
         raise
 
     gateway_ref = str(data["gateway_reference"])
@@ -99,6 +111,7 @@ async def checkout(body: CheckoutIn, user: Dict[str, Any] = Depends(accounts.req
             local_ref, gateway_ref, str(data.get("status")), payme.map_status(data.get("status")), json.dumps(data),
         )
         await conn.execute("UPDATE payments SET provider_ref=$2 WHERE id=$1", payment["id"], gateway_ref)
+        await _log_event(conn, payment["id"], "PROCESSING", f"Push envoyé chez PayMe (ref {gateway_ref}).")
     return {"paymentId": str(payment["id"]), "status": "PROCESSING", "amount": amount, "currency": "XAF"}
 
 
@@ -185,10 +198,12 @@ async def _apply_outcome(payment_id: uuid.UUID, outcome: str) -> None:
                     payment["user_id"], expires, payment_id,
                 )
                 await conn.execute("UPDATE payments SET status='PAID', finalized_at=now() WHERE id=$1", payment_id)
+                await _log_event(conn, payment_id, "PAID", f"Pass crédité jusqu'au {expires.isoformat()}.")
                 logger.info("Pass crédité jusqu'au %s (paiement %s)", expires.isoformat(), payment_id)
             else:
                 status = "EXPIRED" if outcome == "EXPIRED" else "FAILED"
                 await conn.execute("UPDATE payments SET status=$2, finalized_at=now() WHERE id=$1", payment_id, status)
+                await _log_event(conn, payment_id, status, f"Résultat provider: {outcome}.")
 
 
 # --- Réconciliation (filet de sécurité, pas de webhook fiable) --------------------
@@ -346,6 +361,78 @@ async def admin_paygate_transactions(status: Optional[str] = None, limit: int = 
             "failureReason": r["failure_reason"],
         })
     return {"transactions": out}
+
+
+# --- Admin : traçabilité des paiements (en cas de plainte) -----------------------
+
+@router.get("/api/v1/admin/payments")
+async def admin_list_payments(email: Optional[str] = None, status: Optional[str] = None, limit: int = 50,
+                               x_admin_key: Optional[str] = Header(default=None)):
+    core.require_admin(x_admin_key)
+    core.require_db()
+    limit = max(1, min(limit, 200))
+    conditions = []
+    params: list = []
+    if email:
+        params.append(f"%{email.strip().lower()}%")
+        conditions.append(f"u.email ILIKE ${len(params)}")
+    if status:
+        params.append(status)
+        conditions.append(f"p.status = ${len(params)}")
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
+    pool = await core.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT p.*, u.email, u.display_name FROM payments p JOIN users u ON u.id = p.user_id "
+            f"{where} ORDER BY p.created_at DESC LIMIT ${len(params)}",
+            *params,
+        )
+    return {"payments": [
+        {
+            "id": str(r["id"]), "email": r["email"], "displayName": r["display_name"],
+            "amount": int(r["amount"]), "currency": r["currency"], "status": r["status"],
+            "phone": r["customer_phone"], "providerRef": r["provider_ref"],
+            "createdAt": r["created_at"].isoformat(),
+            "finalizedAt": r["finalized_at"].isoformat() if r["finalized_at"] else None,
+        }
+        for r in rows
+    ]}
+
+
+@router.get("/api/v1/admin/payments/{payment_id}")
+async def admin_payment_detail(payment_id: str, x_admin_key: Optional[str] = Header(default=None)):
+    core.require_admin(x_admin_key)
+    core.require_db()
+    try:
+        pid = uuid.UUID(payment_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Paiement introuvable.")
+    pool = await core.get_pool()
+    async with pool.acquire() as conn:
+        payment = await conn.fetchrow(
+            "SELECT p.*, u.email, u.display_name FROM payments p JOIN users u ON u.id = p.user_id WHERE p.id=$1", pid,
+        )
+        if payment is None:
+            raise HTTPException(status_code=404, detail="Paiement introuvable.")
+        events = await conn.fetch("SELECT * FROM payment_events WHERE payment_id=$1 ORDER BY created_at ASC", pid)
+        tx = await conn.fetchrow("SELECT * FROM payment_gateway_transactions WHERE payment_id=$1", pid)
+    return {
+        "id": str(payment["id"]), "email": payment["email"], "displayName": payment["display_name"],
+        "amount": int(payment["amount"]), "currency": payment["currency"], "status": payment["status"],
+        "phone": payment["customer_phone"], "providerRef": payment["provider_ref"],
+        "createdAt": payment["created_at"].isoformat(),
+        "finalizedAt": payment["finalized_at"].isoformat() if payment["finalized_at"] else None,
+        "events": [
+            {"status": e["status"], "detail": e["detail"], "createdAt": e["created_at"].isoformat()}
+            for e in events
+        ],
+        "gatewayTransaction": {
+            "gatewayReference": tx["gateway_reference"], "providerStatus": tx["provider_status"],
+            "status": tx["status"], "failureReason": tx["failure_reason"],
+            "lastPolledAt": tx["last_polled_at"].isoformat() if tx["last_polled_at"] else None,
+        } if tx else None,
+    }
 
 
 class SettingsPatch(BaseModel):

@@ -134,6 +134,29 @@ CREATE TABLE IF NOT EXISTS payment_gateway_transactions (
   raw_status_response     jsonb
 );
 CREATE INDEX IF NOT EXISTS idx_pgt_status ON payment_gateway_transactions (status);
+
+CREATE TABLE IF NOT EXISTS payment_events (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  payment_id uuid NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+  status     text NOT NULL,
+  detail     text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_payment_events_payment ON payment_events (payment_id, created_at);
+
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  payment_id   uuid REFERENCES payments(id) ON DELETE SET NULL,
+  category     text NOT NULL DEFAULT 'autre',
+  message      text NOT NULL,
+  status       text NOT NULL DEFAULT 'open',
+  admin_note   text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets (user_id, created_at DESC);
 """
 
 # Réglages produits, modifiables à chaud via l'admin (app_settings), sans redéploiement.
