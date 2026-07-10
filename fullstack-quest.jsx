@@ -1415,6 +1415,9 @@ const ADMIN_KEY_STORAGE = "fullstack-quest-admin-key";
 const AUTH_TOKEN_KEY = "fullstack-quest-auth-token";
 // Dernier /auth/me connu : permet de garder l'accès (pass, quota) hors-ligne.
 const AUTH_CACHE_KEY = "fullstack-quest-auth-cache";
+// Narration IA du parcours (couche hybride) : cache local, jamais synchronisé,
+// clé = signature du parcours + jour → au plus un appel par état distinct/jour.
+const PARCOURS_NARRATION_KEY = "fullstack-quest-parcours-narration";
 
 // Vérifications automatiques du paiement, espacées : 10s, puis 20s, puis 30s.
 // Ensuite on laisse la main à la vérification manuelle (bouton dans la modale).
@@ -1725,6 +1728,23 @@ function computeParcours(profile, hasPass) {
     completedCount,
     allPassed: frontIdx === -1,
   };
+}
+
+// Couche hybride : le moteur ci-dessus reste la colonne vertébrale (gratuite,
+// hors-ligne) ; par-dessus, ADA peut commenter le plan en une poignée de
+// phrases. Prompt compact (peu de tokens) et borné à la liste calculée — le
+// modèle n'invente pas d'étapes, il ne fait que motiver et donner du sens.
+function buildParcoursPrompt(parcours) {
+  const steps = parcours.steps.slice(0, 4)
+    .map((s, i) => `${i + 1}. ${s.title} — ${s.rationale}`)
+    .join("\n");
+  return [
+    "Tu es ADA, la mentore du jeu Fullstack Quest : bienveillante, concise, tutoiement, zéro jargon inutile.",
+    "Voici le plan d'apprentissage calculé pour l'apprenti aujourd'hui, de la plus haute priorité à la plus basse :",
+    steps,
+    "",
+    "En 2 à 3 phrases MAXIMUM, encourage-le et explique pourquoi commencer par la première étape est le bon choix maintenant. Aucune réponse technique, aucune correction : seulement de la motivation et du sens. N'invente aucune étape absente de la liste.",
+  ].join("\n");
 }
 
 /* Appel générique au coach IA — serveur FSQ (authentifié par compte) ou
@@ -4093,8 +4113,30 @@ function StepCard({ step, onRun, primary }) {
 }
 
 function ParcoursView({ ctx }) {
-  const { setView, parcours, runParcoursAction } = ctx;
+  const { setView, parcours, runParcoursAction, hasPass, aiSettings, authToken } = ctx;
   const { steps, primary, allPassed } = parcours;
+
+  // Signature de l'état courant : jour + suite ordonnée des étapes. Tant qu'elle
+  // ne change pas, la narration IA reste en cache (au plus un appel/jour/état).
+  const sig = `${getDailyReference()}|${steps.map((s) => s.id).join(",")}`;
+  const [narration, setNarration] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(PARCOURS_NARRATION_KEY);
+      const cached = raw ? JSON.parse(raw) : null;
+      return { text: cached && cached.sig === sig ? cached.text : "", busy: false, error: "" };
+    } catch { return { text: "", busy: false, error: "" }; }
+  });
+
+  async function askNarration() {
+    setNarration((n) => ({ ...n, busy: true, error: "" }));
+    const res = await callAi(buildParcoursPrompt(parcours), aiSettings, authToken);
+    if (res.ok) {
+      setNarration({ text: res.text, busy: false, error: "" });
+      try { window.localStorage.setItem(PARCOURS_NARRATION_KEY, JSON.stringify({ sig, text: res.text })); } catch { /* cache best-effort */ }
+    } else {
+      setNarration((n) => ({ ...n, busy: false, error: res.error }));
+    }
+  }
 
   const adaLine = !primary
     ? allPassed
@@ -4130,10 +4172,32 @@ function ParcoursView({ ctx }) {
         {primary && (
           <>
             <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: AMBER }}>▸ MAINTENANT</p>
-            <div className="mb-6">
+            <div className="mb-4">
               <StepCard step={primary} primary onRun={() => runParcoursAction(primary.action)} />
             </div>
           </>
+        )}
+
+        {/* Couche hybride : le plan ci-dessus est déterministe ; ADA peut le
+            commenter à la demande (perk du pass, une fois par état/jour, caché). */}
+        {primary && hasPass && (
+          <div className="mb-6">
+            {narration.text ? (
+              <DialogueBubble name="ADA — ton coach" text={narration.text} accent={SUCCESS} avatar={<AdaAvatar mood="proud" size={40} />} />
+            ) : (
+              <button
+                onClick={askNarration}
+                disabled={narration.busy}
+                className="w-full py-2.5 rounded-lg font-mono text-xs transition-opacity hover:opacity-90 flex items-center justify-center gap-1.5 disabled:opacity-60"
+                style={{ border: `1px solid ${SUCCESS}`, color: SUCCESS, backgroundColor: `${SUCCESS}14` }}
+              >
+                <Sparkles size={13} /> {narration.busy ? "ADA réfléchit…" : "Demande à ADA de commenter ton parcours"}
+              </button>
+            )}
+            {narration.error && (
+              <p className="text-[11px] font-mono mt-2 text-center" style={{ color: DANGER }}>{narration.error}</p>
+            )}
+          </div>
         )}
 
         {steps.length > 1 && (
