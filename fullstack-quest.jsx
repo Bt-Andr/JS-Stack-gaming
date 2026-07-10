@@ -24,7 +24,7 @@ import {
   Volume2, VolumeX, BookOpen, MessageSquareText,
   Terminal, Play, ArrowUp, ArrowDown, ListOrdered, CheckCircle2, XCircle, Hammer,
   GraduationCap, Wrench, RefreshCw, Cloud, Plus, Trash2, Pencil, Database, Swords,
-  Menu, X, Download, Upload, Copy, User, LogOut, Smartphone, Unlock, LifeBuoy
+  Menu, X, Download, Upload, Copy, User, LogOut, Smartphone, Unlock, LifeBuoy, Compass
 } from "lucide-react";
 import {
   BG, PANEL, PANEL_SOFT, LINE, TEXT, TEXT_MUTED, AMBER, SUCCESS, DANGER,
@@ -1224,6 +1224,9 @@ const QUALIFICATION_SIZE = 10;
 // Score minimum sur un secteur pour débloquer son Épreuve Technique (l'exercice
 // code/débogage, retiré du combat normal et proposé à part une fois "qualifié").
 const TECHNICAL_UNLOCK_PCT = 70;
+// Au-dessus de ce record, un secteur réussi est considéré "maîtrisé" : en
+// dessous, le parcours adaptatif propose de le consolider.
+const MASTERY_PCT = 80;
 
 function getBattleQuestions(mod) {
   return mod.questions.filter((q) => !q.technical);
@@ -1555,6 +1558,173 @@ function collectAllQuestions(modules) {
     }
   }
   return all;
+}
+
+/* ---------------------------------------------------------------------- */
+/*  PARCOURS ADAPTATIF — moteur déterministe                              */
+/* ---------------------------------------------------------------------- */
+// À partir des seuls signaux déjà présents dans le profil (records par
+// secteur, cartes SRS dues, axes faibles des revues d'ADA, qualification,
+// chantier), on classe les actions possibles par valeur pédagogique et on
+// désigne LA prochaine étape. Fonction pure, testable, hors-ligne : aucun
+// appel IA. Chaque étape porte un `action` sérialisable (type + params) que
+// l'app traduit en navigation via `runParcoursAction`.
+function moduleAccessibleFor(profile, idx, hasPass) {
+  if (idx <= 0) return true;
+  if (!profile.results?.[MODULES[idx - 1].id]?.passed) return false;
+  const mod = MODULES[idx];
+  if (ADVANCED_TIER.includes(mod.id) && (!hasPass || !profile.qualification?.passed)) return false;
+  return true;
+}
+
+function computeParcours(profile, hasPass) {
+  const results = profile.results || {};
+  const steps = [];
+  const dueCount = getDueItems(profile.srsState || {}).length;
+  const completedCount = MODULES.filter((m) => results[m.id]?.passed).length;
+  const foundationDone = FOUNDATION_TIER.every((id) => results[id]?.passed);
+  const qualified = !!profile.qualification?.passed;
+
+  // 1) Révisions espacées dues — consolider avant d'empiler du neuf. La
+  //    priorité grimpe avec le retard accumulé et finit par passer devant la
+  //    progression quand le backlog devient lourd.
+  if (dueCount > 0) {
+    steps.push({
+      id: "srs",
+      kind: "srs",
+      priority: 50 + Math.min(dueCount, 10) * 3,
+      title: `Réviser ${dueCount} carte${dueCount > 1 ? "s" : ""}`,
+      rationale: "Des notions déjà vues arrivent à échéance. Les revoir maintenant les ancre pour de bon avant d'avancer.",
+      cta: "Lancer les révisions",
+      accent: SUCCESS,
+      action: { type: "srs" },
+    });
+  }
+
+  // 2) Progression — le premier secteur non encore réussi. Selon l'accès, ça
+  //    devient soit le duel lui-même, soit le verrou qui le précède
+  //    (qualification ou pass) — jamais une impasse.
+  const frontIdx = MODULES.findIndex((m) => !results[m.id]?.passed);
+  if (frontIdx !== -1 && moduleAccessibleFor(profile, frontIdx, hasPass)) {
+    const mod = MODULES[frontIdx];
+    const started = !!results[mod.id];
+    steps.push({
+      id: `module-${mod.id}`,
+      kind: "module",
+      priority: 72,
+      title: `${started ? "Reprendre" : "Affronter"} ${mod.title}`,
+      rationale: started
+        ? `Duel déjà entamé (record ${results[mod.id]?.bestScore || 0}%). Termine-le pour ouvrir la suite.`
+        : `Prochain secteur de ta progression. ${mod.boss?.name || "Un boss"} t'y attend.`,
+      cta: started ? "Reprendre le duel" : "Entrer dans le secteur",
+      accent: mod.accent,
+      action: { type: "module", idx: frontIdx },
+    });
+  } else if (frontIdx !== -1 && foundationDone && !qualified) {
+    // Bloqué par la qualification (front avancé, tronc commun bouclé).
+    steps.push({
+      id: "qualification",
+      kind: "qualification",
+      priority: 70,
+      title: "Passer l'Examen de Qualification",
+      rationale: `Tu as bouclé le tronc commun. L'examen (seuil ${QUALIFICATION_PASS_PCT}%) ouvre les 6 secteurs avancés et le Chantier.`,
+      cta: hasPass ? "Passer l'examen" : "Débloquer et passer l'examen",
+      accent: AMBER,
+      locked: !hasPass,
+      action: hasPass ? { type: "qualification" } : { type: "pay" },
+    });
+  } else if (frontIdx !== -1 && !hasPass) {
+    // Bloqué par le pass (secteur avancé, qualifié mais pass expiré/absent).
+    steps.push({
+      id: "unlock",
+      kind: "unlock",
+      priority: 66,
+      title: "Débloquer l'accès complet",
+      rationale: "La suite du parcours — secteurs avancés, Chantier, coach IA — demande le pass d'accès.",
+      cta: "Voir l'accès complet",
+      accent: AMBER,
+      locked: true,
+      action: { type: "pay" },
+    });
+  }
+
+  // 3) Chantier en cours — capstone, forte valeur une fois débloqué.
+  const chantierUnlocked = hasPass && qualified && completedCount >= Math.ceil(MODULES.length / 2);
+  const chantierTotal = CHANTIER.milestones.length;
+  const chantierDone = CHANTIER.milestones.filter((m) => profile.chantier?.milestones?.[m.id]?.done).length;
+  if (chantierUnlocked && chantierDone < chantierTotal) {
+    steps.push({
+      id: "chantier",
+      kind: "chantier",
+      priority: 62,
+      title: chantierDone === 0 ? "Démarrer le Chantier" : `Continuer le Chantier — ${chantierDone}/${chantierTotal}`,
+      rationale: "Le projet fil rouge : c'est là que tu assembles tout ce que tu as appris en une vraie application.",
+      cta: "Ouvrir le Chantier",
+      accent: AMBER,
+      action: { type: "chantier" },
+    });
+  }
+
+  // 4) Épreuve technique disponible (secteur maîtrisé à 70 %+, pas encore
+  //    réussie) — c'est là qu'ADA relit du vrai code et nourrit le dossier.
+  if (hasPass) {
+    const techIdx = MODULES.findIndex((m) => isTechnicalUnlocked(profile, m) && !isTechnicalDone(profile, m));
+    if (techIdx !== -1) {
+      const mod = MODULES[techIdx];
+      steps.push({
+        id: `technical-${mod.id}`,
+        kind: "technical",
+        priority: 46,
+        title: `Épreuve technique — ${mod.title}`,
+        rationale: "Un exercice de code réel t'attend dans ce secteur. ADA le relit et en tire ton dossier de compétences.",
+        cta: "Ouvrir l'épreuve",
+        accent: mod.accent,
+        action: { type: "technical", idx: techIdx },
+      });
+    }
+  }
+
+  // 5) Consolider un secteur réussi de justesse (record < maîtrise).
+  const fragile = MODULES
+    .filter((m) => results[m.id]?.passed && (results[m.id]?.bestScore || 0) < MASTERY_PCT)
+    .sort((a, b) => (results[a.id].bestScore || 0) - (results[b.id].bestScore || 0))[0];
+  if (fragile) {
+    steps.push({
+      id: `consolidate-${fragile.id}`,
+      kind: "consolidate",
+      priority: 44,
+      title: `Consolider ${fragile.title}`,
+      rationale: `Réussi de justesse (${results[fragile.id].bestScore || 0}%). Le rejouer vise la maîtrise (${MASTERY_PCT}%+) et solidifie ta qualification.`,
+      cta: "Rejouer le secteur",
+      accent: fragile.accent,
+      action: { type: "module", idx: MODULES.indexOf(fragile) },
+    });
+  }
+
+  // 6) Axe qualité dominant — l'axe qui revient le plus dans les relectures.
+  const weak = profile.skills?.weakAxes || {};
+  const topAxis = Object.entries(weak).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1])[0];
+  if (topAxis) {
+    steps.push({
+      id: "axis",
+      kind: "axis",
+      priority: 42,
+      title: `Travailler ton axe « ${REVIEW_AXES[topAxis[0]] || topAxis[0]} »`,
+      rationale: `C'est l'axe le plus signalé par ADA (${topAxis[1]}×). Vise-le au prochain exercice de code, puis redemande une revue.`,
+      cta: "Voir mon dossier",
+      accent: "#8ECAE6",
+      action: { type: "skills" },
+    });
+  }
+
+  steps.sort((a, b) => b.priority - a.priority);
+  return {
+    steps,
+    primary: steps[0] || null,
+    dueCount,
+    completedCount,
+    allPassed: frontIdx === -1,
+  };
 }
 
 /* Appel générique au coach IA — serveur FSQ (authentifié par compte) ou
@@ -3897,6 +4067,96 @@ function ModalsHost({ ctx }) {
   );
 }
 
+/* --- Parcours adaptatif : la prochaine étape, puis la file priorisée --- */
+function StepCard({ step, onRun, primary }) {
+  const locked = !!step.locked;
+  return (
+    <Frame accent={step.accent} className={primary ? "p-4" : "p-3"}>
+      <div style={{ backgroundColor: PANEL }} className={`${primary ? "p-4 -m-4" : "p-3 -m-3"} rounded-sm`}>
+        <div className="flex items-start gap-2 mb-1">
+          {locked && <Lock size={13} style={{ color: step.accent }} className="mt-0.5 shrink-0" />}
+          <h4 className="font-mono font-bold leading-snug" style={{ color: step.accent, fontSize: primary ? "1rem" : "0.85rem" }}>
+            {step.title}
+          </h4>
+        </div>
+        <p className="text-[12px] leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>{step.rationale}</p>
+        <button
+          onClick={onRun}
+          className="w-full py-2 rounded-lg font-mono text-xs transition-opacity hover:opacity-90 flex items-center justify-center gap-1.5"
+          style={{ backgroundColor: step.accent, color: BG }}
+        >
+          {step.cta} <ChevronRight size={14} />
+        </button>
+      </div>
+    </Frame>
+  );
+}
+
+function ParcoursView({ ctx }) {
+  const { setView, parcours, runParcoursAction } = ctx;
+  const { steps, primary, allPassed } = parcours;
+
+  const adaLine = !primary
+    ? allPassed
+      ? "Tout est à jour, Gardien : chaque secteur est purifié et rien n'attend en révision. Reviens quand une carte redevient due — je veillerai."
+      : "Rien d'urgent pour l'instant. Continue à explorer la carte quand tu veux."
+    : primary.kind === "srs"
+    ? "Avant d'attaquer du neuf, revoyons ce qui commence à s'effacer. C'est le meilleur retour sur ton temps aujourd'hui."
+    : primary.kind === "qualification"
+    ? "Tu es prêt pour l'étape qui ouvre tout le reste. Concentre-toi là-dessus."
+    : primary.kind === "chantier"
+    ? "Place à la construction. C'est là que tout ce que tu sais prend forme."
+    : "Voici où porter ton effort maintenant. Une étape à la fois — je t'accompagne.";
+
+  return (
+    <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+        <button onClick={() => setView("map")} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+          <ArrowLeft size={14} /> Retour à la carte
+        </button>
+
+        <div className="flex items-center gap-2 mb-1">
+          <Compass size={20} style={{ color: AMBER }} />
+          <h2 className="font-mono font-bold text-xl">Ton parcours</h2>
+        </div>
+        <p className="text-sm mb-6 leading-relaxed" style={{ color: TEXT_MUTED }}>
+          Bâti à partir de tes résultats, tes révisions dues et les relectures d'ADA : la prochaine étape à plus forte valeur, puis la suite.
+        </p>
+
+        <div className="mb-5">
+          <DialogueBubble name="ADA" text={adaLine} accent="#8ECAE6" avatar={<AdaAvatar mood={primary ? "happy" : "proud"} size={44} />} />
+        </div>
+
+        {primary && (
+          <>
+            <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: AMBER }}>▸ MAINTENANT</p>
+            <div className="mb-6">
+              <StepCard step={primary} primary onRun={() => runParcoursAction(primary.action)} />
+            </div>
+          </>
+        )}
+
+        {steps.length > 1 && (
+          <>
+            <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: TEXT_MUTED }}>ENSUITE</p>
+            <div className="flex flex-col gap-3">
+              {steps.slice(1).map((step) => (
+                <StepCard key={step.id} step={step} onRun={() => runParcoursAction(step.action)} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {!primary && (
+          <div className="text-center py-8">
+            <p className="font-mono text-sm" style={{ color: TEXT_MUTED }}>Aucune étape en attente.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* --- Carte du monde : parcours des secteurs -------------------------- */
 function MapView({ ctx }) {
   const {
@@ -3904,7 +4164,9 @@ function MapView({ ctx }) {
     badgeCount, isUnlocked, nextIdx, startModule, confirmReset, setConfirmReset, resetProgress,
     startDailyChallenge, startSrsSession, startQualificationExam, startTechnicalTrial,
     authToken, authUser, access, hasPass, openModal, openSupport,
+    parcours, runParcoursAction,
   } = ctx;
+  const primaryStep = parcours?.primary || null;
   const qualified = !!profile.qualification?.passed;
   const chantierUnlocked = hasPass && qualified && completedCount >= Math.ceil(MODULES.length / 2);
   const foundationDone = FOUNDATION_TIER.every((id) => profile.results[id]?.passed);
@@ -4016,8 +4278,57 @@ function MapView({ ctx }) {
           </button>
         )}
 
+        {/* Continuer mon parcours — la prochaine étape à plus forte valeur,
+            calculée depuis les résultats/SRS/revues. Point d'entrée principal. */}
+        <div className="mt-6">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Compass size={14} style={{ color: AMBER }} />
+            <p className="font-mono text-[11px] tracking-widest" style={{ color: AMBER }}>CONTINUER MON PARCOURS</p>
+          </div>
+          {primaryStep ? (
+            <Frame accent={primaryStep.accent} className="p-4">
+              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+                <div className="flex items-start gap-2 mb-1">
+                  {primaryStep.locked && <Lock size={14} style={{ color: primaryStep.accent }} className="mt-0.5 shrink-0" />}
+                  <h3 className="font-mono font-bold text-base leading-snug" style={{ color: primaryStep.accent }}>{primaryStep.title}</h3>
+                </div>
+                <p className="text-[12px] leading-relaxed mb-3" style={{ color: TEXT_MUTED }}>{primaryStep.rationale}</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => runParcoursAction(primaryStep.action)}
+                    className="flex-1 py-2 rounded-lg font-mono text-xs transition-opacity hover:opacity-90 flex items-center justify-center gap-1.5"
+                    style={{ backgroundColor: primaryStep.accent, color: BG }}
+                  >
+                    {primaryStep.cta} <ChevronRight size={14} />
+                  </button>
+                  <button
+                    onClick={() => setView("parcours")}
+                    className="px-3 py-2 rounded-lg font-mono text-[11px] transition-opacity hover:opacity-90"
+                    style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}
+                  >
+                    Tout voir
+                  </button>
+                </div>
+              </div>
+            </Frame>
+          ) : (
+            <button
+              onClick={() => setView("parcours")}
+              className="w-full p-4 rounded-lg text-left flex items-center gap-3 hover:opacity-90 transition-opacity"
+              style={{ backgroundColor: `${SUCCESS}14`, border: `1px solid ${SUCCESS}` }}
+            >
+              <Compass size={18} style={{ color: SUCCESS }} className="shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-mono text-xs" style={{ color: SUCCESS }}>Parcours à jour</p>
+                <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>Rien n'attend — reviens quand une révision redevient due</p>
+              </div>
+              <ChevronRight size={16} style={{ color: TEXT_MUTED }} className="shrink-0" />
+            </button>
+          )}
+        </div>
+
         {/* Daily Challenge & SRS Quick Access */}
-        <div className="mt-8 grid grid-cols-2 gap-3 mb-3">
+        <div className="mt-6 grid grid-cols-2 gap-3 mb-3">
           <button
             onClick={() => ctx.startDailyChallenge?.()}
             className="p-4 rounded-lg text-center transition-colors hover:opacity-80"
@@ -5602,6 +5913,24 @@ export default function FullstackQuest() {
       ? "Tu as purifié toute la Stack. Tu n'es plus un simple Sprite : tu es un Gardien. Merci, pour nous tous."
       : `Secteur ${completedCount}/${MODULES.length} purifié. ${MODULES[nextIdx]?.boss.name ?? "Un boss"} rôde dans le prochain duel…`;
 
+  // Parcours adaptatif : la file d'étapes priorisées, recalculée à chaque
+  // render depuis le profil courant. Le dispatcher traduit l'action
+  // sérialisable d'une étape en navigation concrète.
+  const parcours = computeParcours(profile, hasPass);
+  function runParcoursAction(action) {
+    if (!action) return;
+    switch (action.type) {
+      case "srs": return startSrsSession();
+      case "module": return startModule(action.idx);
+      case "technical": return startTechnicalTrial(action.idx);
+      case "qualification": return startQualificationExam();
+      case "chantier": return setView("chantier");
+      case "skills": return setView("skills");
+      case "pay": return openModal(authToken ? "pay" : "account");
+      default: return;
+    }
+  }
+
   // Tout ce dont les vues ont besoin, regroupé en un seul objet.
   const ctx = {
     profile,
@@ -5614,6 +5943,7 @@ export default function FullstackQuest() {
     aiHint, aiBusy, aiError, askLocalHint, clearAiHint,
     review, askCodeReview, resubmitForReview, recordChantierReview,
     levelInfo, completedCount, badgeCount, nextIdx, adaGreet,
+    parcours, runParcoursAction,
     isUnlocked, startModule, engage, backToMap, resetProgress,
     selectAnswer, runTests, moveLine, validateOrder, nextQuestion,
     dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, startDailyChallenge,
@@ -5645,6 +5975,7 @@ export default function FullstackQuest() {
   if (view === "qualification") return <><QualificationView ctx={ctx} />{chrome}</>;
   if (view === "technical") return <><TechnicalView ctx={ctx} />{chrome}</>;
   if (view === "skills") return <><SkillProfileView ctx={ctx} />{chrome}</>;
+  if (view === "parcours") return <><ParcoursView ctx={ctx} />{chrome}</>;
   return <><MapView ctx={ctx} />{chrome}</>;
 }
 
