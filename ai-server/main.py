@@ -103,6 +103,44 @@ SCOPE_SYSTEM_PROMPT = (
 )
 MAX_TOKENS_CEILING = 500
 
+# Revue de code : contrairement au coach (qui ne doit jamais donner la réponse),
+# la revue intervient APRÈS que les tests passent — juger la qualité et nommer
+# précisément l'amélioration est ici tout l'intérêt pédagogique.
+REVIEW_SYSTEM_PROMPT = (
+    "Tu es le relecteur de code de Fullstack Quest, une application qui enseigne "
+    "le développement web fullstack en JavaScript. Le code soumis passe déjà tous "
+    "ses tests : ne juge PAS la correction, juge la QUALITÉ — nommage, lisibilité, "
+    "simplicité, idiomes JavaScript modernes, robustesse face aux cas limites. "
+    "Réponds en français, dans ce format exact :\n"
+    "Ligne 1 : « VERDICT: PROPRE » si tu accepterais ce code tel quel en revue "
+    "professionnelle, sinon « VERDICT: A_POLIR ».\n"
+    "Puis 2 à 4 phrases : d'abord ce qui est bien fait, puis — si A_POLIR — LA "
+    "seule amélioration la plus utile, concrète (le nom exact à changer, l'idiome "
+    "précis à utiliser), sans réécrire la solution complète à sa place. "
+    "Sois exigeant mais encourageant. Pas de markdown lourd."
+)
+REVIEW_VERDICT_RE = re.compile(r"^\s*VERDICT\s*:\s*(PROPRE|[AÀ][_ ]?POLIR)\b", re.IGNORECASE)
+
+# Variante Chantier : ici rien n'est exécuté — le joueur colle le code d'un
+# jalon de son vrai projet. La revue juge la conformité aux critères
+# d'acceptation ET la qualité, en assumant qu'elle ne peut pas lancer le code.
+CHANTIER_REVIEW_SYSTEM_PROMPT = (
+    "Tu es le relecteur de code de Fullstack Quest. L'apprenant construit un vrai "
+    "petit projet fullstack dans son propre éditeur et te colle le code d'un jalon. "
+    "Tu ne peux PAS exécuter ce code : juge sur lecture. Vérifie deux choses : "
+    "1) le code répond-il visiblement à la spécification et aux critères "
+    "d'acceptation du jalon ? 2) est-il de qualité professionnelle — nommage, "
+    "lisibilité, simplicité, gestion des cas d'erreur ? "
+    "Réponds en français, dans ce format exact :\n"
+    "Ligne 1 : « VERDICT: PROPRE » si les critères semblent remplis et que tu "
+    "accepterais ce code en revue professionnelle, sinon « VERDICT: A_POLIR ».\n"
+    "Puis 2 à 5 phrases : d'abord ce qui est bien, puis le point le plus important "
+    "à corriger (critère manquant en priorité, sinon LA meilleure amélioration de "
+    "qualité), concret et actionnable, sans réécrire la solution à sa place. "
+    "Si le code collé est manifestement hors sujet ou vide, dis-le simplement. "
+    "Sois exigeant mais encourageant. Pas de markdown lourd."
+)
+
 
 class GenerateRequest(BaseModel):
     prompt: str
@@ -125,15 +163,19 @@ def _auth(x_api_key: Optional[str]) -> None:
 # "out": tokens_sortie} quand l'amont le fournit — consommation réelle
 # facturable, journalisée par compte pour surveiller la marge.
 
-async def _generate_stub(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
+async def _generate_stub(prompt: str, max_tokens: int, system_prompt: str) -> Tuple[str, Dict[str, int]]:
     model_label = AI_MODEL or "stub-model"
+    if system_prompt is not SCOPE_SYSTEM_PROMPT:
+        # Revue simulée (exercice ou chantier) dans le format contractuel, pour
+        # tester le flux complet sans amont.
+        return f"VERDICT: A_POLIR\n[{model_label}] Revue simulée : la structure est correcte, mais un nom de variable pourrait être plus explicite.", {}
     return f"[{model_label}] Réponse simulée pour: {prompt[:240]}", {}
 
 
-async def _generate_ollama(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
+async def _generate_ollama(prompt: str, max_tokens: int, system_prompt: str) -> Tuple[str, Dict[str, int]]:
     upstream = AI_UPSTREAM_URL or "http://localhost:11434"
     # /api/generate has no separate system role — fold the scope instruction into the prompt text.
-    scoped_prompt = f"{SCOPE_SYSTEM_PROMPT}\n\n---\n\n{prompt}"
+    scoped_prompt = f"{system_prompt}\n\n---\n\n{prompt}"
     payload = {"model": AI_MODEL or "llama3.1", "prompt": scoped_prompt, "stream": False, "options": {"num_predict": max_tokens}}
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -148,11 +190,11 @@ async def _generate_ollama(prompt: str, max_tokens: int) -> Tuple[str, Dict[str,
     return data.get("response", ""), usage
 
 
-async def _call_chat_completions(base_url: str, api_key: str, model: str, prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
+async def _call_chat_completions(base_url: str, api_key: str, model: str, prompt: str, max_tokens: int, system_prompt: str) -> Tuple[str, Dict[str, int]]:
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": SCOPE_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
         "max_tokens": max_tokens,
@@ -178,30 +220,66 @@ async def _call_chat_completions(base_url: str, api_key: str, model: str, prompt
     return choices[0].get("message", {}).get("content", "") or "", usage
 
 
-async def _generate_openai_compatible(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
+async def _generate_openai_compatible(prompt: str, max_tokens: int, system_prompt: str) -> Tuple[str, Dict[str, int]]:
     upstream = AI_UPSTREAM_URL
     if not upstream:
         raise HTTPException(status_code=500, detail="AI_UPSTREAM_URL is required for openai_compatible mode")
     api_key = os.getenv("AI_UPSTREAM_API_KEY", "").strip()
-    return await _call_chat_completions(upstream, api_key, AI_MODEL or "local-model", prompt, max_tokens)
+    return await _call_chat_completions(upstream, api_key, AI_MODEL or "local-model", prompt, max_tokens, system_prompt)
 
 
-async def _generate_openai(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
+async def _generate_openai(prompt: str, max_tokens: int, system_prompt: str) -> Tuple[str, Dict[str, int]]:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required for provider=openai")
-    return await _call_chat_completions("https://api.openai.com/v1", api_key, AI_MODEL or "gpt-4o-mini", prompt, max_tokens)
+    return await _call_chat_completions("https://api.openai.com/v1", api_key, AI_MODEL or "gpt-4o-mini", prompt, max_tokens, system_prompt)
 
 
-async def _generate_gemini(prompt: str, max_tokens: int) -> Tuple[str, Dict[str, int]]:
+async def _generate_gemini(prompt: str, max_tokens: int, system_prompt: str) -> Tuple[str, Dict[str, int]]:
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is required for provider=gemini")
     # Gemini exposes an OpenAI-compatible endpoint, so the same chat/completions
     # call shape works — no separate SDK or payload format needed.
     return await _call_chat_completions(
-        "https://generativelanguage.googleapis.com/v1beta/openai", api_key, AI_MODEL or "gemini-2.0-flash", prompt, max_tokens
+        "https://generativelanguage.googleapis.com/v1beta/openai", api_key, AI_MODEL or "gemini-2.0-flash", prompt, max_tokens, system_prompt
     )
+
+
+async def _dispatch_ai(prompt: str, max_tokens: int, system_prompt: str) -> Tuple[str, Dict[str, int]]:
+    """Route vers le fournisseur configuré — partagé par /generate et /review."""
+    provider = AI_PROVIDER
+    if provider == "ollama":
+        return await _generate_ollama(prompt, max_tokens, system_prompt)
+    if provider == "openai":
+        return await _generate_openai(prompt, max_tokens, system_prompt)
+    if provider == "gemini":
+        return await _generate_gemini(prompt, max_tokens, system_prompt)
+    if provider in {"openai_compatible", "openai-compatible"}:
+        return await _generate_openai_compatible(prompt, max_tokens, system_prompt)
+    return await _generate_stub(prompt, max_tokens, system_prompt)
+
+
+async def _authorize_ai_call(authorization: Optional[str], x_api_key: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Deux voies d'accès aux endpoints IA :
+    - compte joueur (Bearer JWT) : exige un pass actif + quota journalier partagé
+      entre indices et revues (une revue « coûte » un indice) ;
+    - clé partagée X-API-Key (legacy) : conservée pour l'admin et les tests.
+    Renvoie l'utilisateur (pour journaliser les tokens) ou None (voie clé)."""
+    user = None
+    if accounts.auth_configured():
+        user = await accounts.optional_user(authorization)
+    if user is not None:
+        if await accounts.active_pass_expiry(user["id"]) is None:
+            raise HTTPException(status_code=402, detail="Le coach IA fait partie de l'accès complet — débloque un pass depuis le menu Compte.")
+        settings = await core.get_settings()
+        daily_limit = int(settings["aiDailyHints"])
+        used = await accounts.consume_hint(user["id"], daily_limit)
+        if used is None:
+            raise HTTPException(status_code=429, detail=f"Quota d'indices du jour atteint ({daily_limit}/jour) — il se recharge demain.")
+    else:
+        _auth(x_api_key)
+    return user
 
 
 def _redis_configured() -> bool:
@@ -511,40 +589,79 @@ MAX_PROMPT_CHARS = 4000
 @app.post("/api/v1/generate", response_model=GenerateResponse)
 async def generate(req: GenerateRequest, x_api_key: Optional[str] = Header(default=None),
                    authorization: Optional[str] = Header(default=None)):
-    # Deux voies d'accès :
-    #  - compte joueur (Bearer JWT) : exige un pass actif + quota journalier,
-    #    et journalise la consommation réelle de tokens ;
-    #  - clé partagée X-API-Key (legacy) : conservée pour l'admin et les tests.
-    user = None
-    if accounts.auth_configured():
-        user = await accounts.optional_user(authorization)
-    if user is not None:
-        if await accounts.active_pass_expiry(user["id"]) is None:
-            raise HTTPException(status_code=402, detail="Le coach IA fait partie de l'accès complet — débloque un pass depuis le menu Compte.")
-        settings = await core.get_settings()
-        daily_limit = int(settings["aiDailyHints"])
-        used = await accounts.consume_hint(user["id"], daily_limit)
-        if used is None:
-            raise HTTPException(status_code=429, detail=f"Quota d'indices du jour atteint ({daily_limit}/jour) — il se recharge demain.")
-    else:
-        _auth(x_api_key)
+    user = await _authorize_ai_call(authorization, x_api_key)
     if len(req.prompt) > MAX_PROMPT_CHARS:
         raise HTTPException(status_code=400, detail=f"Prompt trop long ({len(req.prompt)} caractères, max {MAX_PROMPT_CHARS}).")
-    provider = AI_PROVIDER
     max_tokens = min(req.max_tokens or 256, MAX_TOKENS_CEILING)
-    if provider == "ollama":
-        answer, usage = await _generate_ollama(req.prompt, max_tokens)
-    elif provider == "openai":
-        answer, usage = await _generate_openai(req.prompt, max_tokens)
-    elif provider == "gemini":
-        answer, usage = await _generate_gemini(req.prompt, max_tokens)
-    elif provider in {"openai_compatible", "openai-compatible"}:
-        answer, usage = await _generate_openai_compatible(req.prompt, max_tokens)
-    else:
-        answer, usage = await _generate_stub(req.prompt, max_tokens)
+    answer, usage = await _dispatch_ai(req.prompt, max_tokens, SCOPE_SYSTEM_PROMPT)
     if user is not None:
         await accounts.record_tokens(user["id"], usage.get("in", 0), usage.get("out", 0))
     return GenerateResponse(prompt=req.prompt, answer=answer)
+
+
+# ---------------------------------------------------------------------------
+# Revue de code — le différenciateur pédagogique : après que les tests d'un
+# exercice passent, l'IA relit la solution comme un senior en code review et
+# rend un verdict de qualité (« propre » / « à polir ») + UNE amélioration.
+# Le prompt utilisateur est assemblé ICI, pas côté client, pour que le contrat
+# (format VERDICT, périmètre qualité) s'applique à tout appelant.
+# ---------------------------------------------------------------------------
+
+MAX_REVIEW_CODE_CHARS = 4000
+
+
+class ReviewRequest(BaseModel):
+    prompt: str                      # énoncé de l'exercice / spec du jalon
+    code: str                        # solution du joueur (tests verts) ou code collé du jalon
+    starter: Optional[str] = None    # code de départ fourni par l'exercice
+    tests: Optional[list] = None     # appels de test ("exercise") ou critères d'acceptation ("chantier")
+    mode: str = "exercise"           # "exercise" (tests verts, exécutés) | "chantier" (jugé sur lecture)
+
+
+class ReviewResponse(BaseModel):
+    verdict: Optional[str] = None    # "propre" | "a_polir" | None si format non respecté
+    comment: str
+
+
+def _parse_review(text: str) -> Tuple[Optional[str], str]:
+    lines = text.strip().splitlines()
+    if lines:
+        m = REVIEW_VERDICT_RE.match(lines[0])
+        if m:
+            verdict = "propre" if m.group(1).upper() == "PROPRE" else "a_polir"
+            return verdict, "\n".join(lines[1:]).strip()
+    return None, text.strip()
+
+
+@app.post("/api/v1/review", response_model=ReviewResponse)
+async def review_code(req: ReviewRequest, x_api_key: Optional[str] = Header(default=None),
+                      authorization: Optional[str] = Header(default=None)):
+    user = await _authorize_ai_call(authorization, x_api_key)
+    code = req.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Aucun code à relire.")
+    if len(code) > MAX_REVIEW_CODE_CHARS:
+        raise HTTPException(status_code=400, detail=f"Code trop long ({len(code)} caractères, max {MAX_REVIEW_CODE_CHARS}).")
+    if len(req.prompt) > MAX_PROMPT_CHARS:
+        raise HTTPException(status_code=400, detail=f"Énoncé trop long ({len(req.prompt)} caractères, max {MAX_PROMPT_CHARS}).")
+    if req.mode == "chantier":
+        parts = ["Spécification du jalon :", req.prompt.strip()]
+        if req.tests:
+            parts += ["", "Critères d'acceptation :"] + [f"- {t}" for t in map(str, req.tests[:12])]
+        system_prompt = CHANTIER_REVIEW_SYSTEM_PROMPT
+    else:
+        parts = ["Énoncé de l'exercice :", req.prompt.strip()]
+        if req.starter and req.starter.strip():
+            parts += ["", "Code de départ fourni :", req.starter.strip()]
+        if req.tests:
+            parts += ["", "Tests (tous verts) :"] + [f"- {t}" for t in map(str, req.tests[:12])]
+        system_prompt = REVIEW_SYSTEM_PROMPT
+    parts += ["", "Code soumis par l'apprenant :", code]
+    answer, usage = await _dispatch_ai("\n".join(parts), 350, system_prompt)
+    if user is not None:
+        await accounts.record_tokens(user["id"], usage.get("in", 0), usage.get("out", 0))
+    verdict, comment = _parse_review(answer)
+    return ReviewResponse(verdict=verdict, comment=comment or "Revue indisponible — réessaie dans un instant.")
 
 
 @app.get("/healthz")
