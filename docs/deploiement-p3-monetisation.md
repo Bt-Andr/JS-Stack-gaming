@@ -56,9 +56,22 @@ dans `ai_usage`.
 - Progression par compte : `GET/PUT /api/v1/me/profile` (remplace le sync
   nom+PIN ; les anciennes routes `/api/v1/profile/{account}` restent pour les
   vieux clients, à retirer plus tard).
-- Étape suivante (« phase B », non faite) : sortir du bundle JS les questions
-  statiques des secteurs avancés pour que même le contenu embarqué ne soit
-  plus accessible sans payer.
+- Phase B (durcissement du bundle) — **partiellement faite** : sortir du bundle
+  JS les questions statiques des secteurs avancés pour que même le contenu
+  embarqué ne soit plus accessible sans payer. Fait : un outil d'import (console
+  admin → onglet Liste → « 📥 Importer les secteurs avancés ») verse les 6
+  secteurs payants dans la banque Neon, idempotent (doublons ignorés via
+  content_hash). **Reste à faire** (pas encore fait, exige une base réelle pour
+  être vérifié) : (1) lancer l'import contre Render une fois ; (2) vérifier que
+  `GET /api/v1/questions` sert bien ces questions avec un Bearer à pass actif et
+  les masque sans ; (3) alors seulement, un commit retire les questions avancées
+  du tableau `MODULES`. Tant que ce retrait n'est pas fait, le contenu avancé
+  reste lisible dans le bundle — le verrou actuel est fonctionnel (l'app ne les
+  affiche pas sans pass) mais pas « anti-DevTools ».
+  Note : 1 question de l'Épreuve TS (`dernier([])`, dont un test attend
+  `undefined`) n'est pas migrable telle quelle (JSON ne transporte pas
+  `undefined`) — l'outil la signale « non migrable » et la laisse au bundle.
+  Il faudrait réécrire son test (ex. attendre un booléen) pour la migrer.
 
 ## 6. Vérification après déploiement
 

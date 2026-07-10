@@ -1273,6 +1273,27 @@ function mapRemoteQuestion(r) {
   return q;
 }
 
+// Convertit une question statique (du bundle) en corps d'API pour la banque
+// admin. Prérequis de la « Phase B » : verser les secteurs avancés dans la
+// banque avant de pouvoir un jour les retirer du bundle. L'anti-doublon
+// (content_hash) côté serveur rend l'import idempotent.
+function staticQuestionToBankPayload(q, moduleId) {
+  const body = { moduleId, qtype: q.type || "qcm", technical: !!q.technical, prompt: q.prompt };
+  if (q.explain) body.explain = q.explain;
+  if (!q.type || q.type === "qcm") {
+    body.qtype = "qcm";
+    body.options = q.options;
+    body.correct = q.correct;
+    if (q.code) body.code = q.code;
+  } else if (q.type === "code" || q.type === "refactor") {
+    body.starter = q.starter;
+    body.tests = q.tests;
+  } else if (q.type === "order") {
+    body.lines = q.lines;
+  }
+  return body;
+}
+
 // Reconstruit chaque module = statiques + distantes triées par id (ordre
 // déterministe : même banque => même pool => même Défi Quotidien, qui est
 // une évaluation commune). Idempotent : repartir de staticQuestions permet
@@ -2521,8 +2542,55 @@ function AdminView({ ctx }) {
   // doit passer les tests avant de pouvoir publier.
   const [solution, setSolution] = useState("");
   const [solResults, setSolResults] = useState(null);
+  // Import en masse des secteurs avancés dans la banque (prérequis Phase B).
+  const [seedBusy, setSeedBusy] = useState(false);
+  const [seedReport, setSeedReport] = useState(null); // { added, skipped, unrepresentable, failed, errors:[] }
 
   const f = (patch) => { setForm((s) => ({ ...s, ...patch })); setSolResults(null); };
+
+  // Verse les questions statiques des secteurs avancés dans la banque Neon.
+  // Idempotent : le serveur renvoie 409 sur un quasi-doublon (compté "déjà
+  // présent"), donc relancer ne crée aucune duplication.
+  async function seedAdvancedBank() {
+    if (seedBusy) return;
+    setSeedBusy(true);
+    setError("");
+    setNotice("");
+    const report = { added: 0, skipped: 0, unrepresentable: 0, failed: 0, errors: [] };
+    try {
+      const advanced = MODULES.filter((m) => ADVANCED_TIER.includes(m.id));
+      for (const mod of advanced) {
+        for (const q of mod.staticQuestions) {
+          // Un test dont l'attendu est undefined ne survit pas à JSON (la clé
+          // disparaît) : la banque ne peut pas le représenter fidèlement. On
+          // le laisse dans le bundle plutôt que de l'importer cassé.
+          if ((q.type === "code" || q.type === "refactor") && (q.tests || []).some((t) => t.expect === undefined)) {
+            report.unrepresentable += 1;
+            if (report.errors.length < 8) report.errors.push(`non migrable · ${mod.id} · ${q.prompt.slice(0, 40)} (un test attend undefined)`);
+            continue;
+          }
+          try {
+            await adminFetch("/api/v1/admin/questions", adminKey, {
+              method: "POST",
+              body: JSON.stringify(staticQuestionToBankPayload(q, mod.id)),
+            });
+            report.added += 1;
+          } catch (e) {
+            const msg = String(e?.message || e);
+            if (/existe déjà|409/.test(msg)) report.skipped += 1;
+            else { report.failed += 1; if (report.errors.length < 5) report.errors.push(`${mod.id} · ${q.prompt.slice(0, 40)} → ${msg}`); }
+          }
+        }
+      }
+      setSeedReport(report);
+      await refreshBank();
+      await loadList();
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setSeedBusy(false);
+    }
+  }
 
   async function loadList() {
     setListBusy(true);
@@ -2669,6 +2737,33 @@ function AdminView({ ctx }) {
 
         {tab === "list" ? (
           <>
+            {/* Import en masse : verse les secteurs avancés du bundle dans la banque.
+                Prérequis pour pouvoir un jour les retirer du bundle (Phase B). */}
+            <div className="mb-3 p-3 rounded-lg" style={{ backgroundColor: PANEL, border: `1px solid ${LINE}` }}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: "#8ECAE6" }}>📥 IMPORTER LES SECTEURS AVANCÉS</p>
+                  <p className="text-[11px] leading-relaxed mt-0.5" style={{ color: TEXT_MUTED }}>
+                    Copie les questions statiques des 6 secteurs payants ({ADVANCED_TIER.join(", ")}) dans la banque. Sans risque : relançable, les doublons sont ignorés.
+                  </p>
+                </div>
+                <button onClick={seedAdvancedBank} disabled={seedBusy} className="px-3 py-1.5 rounded-lg font-mono text-xs shrink-0 disabled:opacity-50" style={{ backgroundColor: "#8ECAE6", color: BG }}>
+                  {seedBusy ? "Import…" : "Importer"}
+                </button>
+              </div>
+              {seedReport && (
+                <div className="mt-2 text-[11px] font-mono" style={{ color: TEXT }}>
+                  <span style={{ color: SUCCESS }}>{seedReport.added} ajoutée(s)</span>
+                  {" · "}<span style={{ color: TEXT_MUTED }}>{seedReport.skipped} déjà en banque</span>
+                  {seedReport.unrepresentable > 0 && <>{" · "}<span style={{ color: AMBER }}>{seedReport.unrepresentable} non migrable(s)</span></>}
+                  {seedReport.failed > 0 && <>{" · "}<span style={{ color: DANGER }}>{seedReport.failed} échec(s)</span></>}
+                  {seedReport.errors.map((err, i) => (
+                    <p key={i} className="mt-1" style={{ color: DANGER }}>{err}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex gap-2 mb-3">
               <select value={filterModule} onChange={(e) => setFilterModule(e.target.value)} className="px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={selectStyle}>
                 <option style={optStyle} value="">Tous les modules</option>
@@ -4479,7 +4574,7 @@ function ResultView({ ctx }) {
 /*  COMPOSANT PRINCIPAL — état, logique de combat, routage                */
 /* ====================================================================== */
 // Exports nommés pour les tests (le harness n'importe que le défaut).
-export { MODULES, applyRemoteBank, isUsableRemote, STATIC_BATTLE_QIDS, collectAllQuestions, getBattleQuestions };
+export { MODULES, applyRemoteBank, isUsableRemote, STATIC_BATTLE_QIDS, collectAllQuestions, getBattleQuestions, staticQuestionToBankPayload, ADVANCED_TIER };
 
 export default function FullstackQuest() {
   const [profile, setProfile] = useState(null);
