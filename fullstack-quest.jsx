@@ -1418,6 +1418,8 @@ const AUTH_CACHE_KEY = "fullstack-quest-auth-cache";
 // Narration IA du parcours (couche hybride) : cache local, jamais synchronisé,
 // clé = signature du parcours + jour → au plus un appel par état distinct/jour.
 const PARCOURS_NARRATION_KEY = "fullstack-quest-parcours-narration";
+// Résultat de défi joué hors-ligne, en attente d'envoi au serveur (classement).
+const PENDING_DAILY_KEY = "fullstack-quest-pending-daily";
 
 // Vérifications automatiques du paiement, espacées : 10s, puis 20s, puis 30s.
 // Ensuite on laisse la main à la vérification manuelle (bouton dans la modale).
@@ -1540,6 +1542,10 @@ function isQcm(q) {
   return !q.type || q.type === "qcm";
 }
 
+// Le Défi est chronométré, sans aide IA : un aperçu du niveau réel sous stress.
+// Un compte à rebours par question ; à zéro, la question est comptée ratée.
+const DAILY_SECONDS_PER_Q = 45;
+
 function generateDailyRun(seed, modules) {
   const r = rng(seed);
   const picked = [];
@@ -1551,6 +1557,19 @@ function generateDailyRun(seed, modules) {
     picked.push({ ...q, moduleId: mod.id, moduleName: mod.title });
   }
   return picked;
+}
+
+// Marque le défi du jour comme fait localement (clé datée), sans écraser un vrai
+// résultat déjà présent. Sert à refléter dans le gate un défi passé sur un AUTRE
+// appareil (serveur : access.dailyDoneToday) — sans jamais faire confiance à un
+// cache d'access qui pourrait être périmé d'un jour à l'autre.
+function markDailyDoneLocally(profile) {
+  const ref = getDailyReference();
+  if (profile?.dailyRuns?.[ref]) return profile;
+  return {
+    ...profile,
+    dailyRuns: { ...(profile?.dailyRuns || {}), [ref]: { doneElsewhere: true, completedISO: new Date().toISOString() } },
+  };
 }
 
 function collectAllQuestions(modules) {
@@ -2186,13 +2205,93 @@ function TechnicalView({ ctx }) {
 }
 
 /* --- Daily Seeded Challenge ----------------------------------------- */
+// Écran-gate obligatoire : barre l'accès au reste tant que le Défi du Jour
+// n'est pas fait. L'invité peut s'authentifier (on vérifie alors côté serveur
+// s'il l'a déjà fait ailleurs) ; abandonner déconnecte mais ne libère pas le gate.
+function DailyGateView({ ctx }) {
+  const { startDailyChallenge, authUser, accountLogout, openModal } = ctx;
+  const loggedIn = !!authUser;
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center font-sans px-4" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-md w-full text-center">
+        <div className="flex justify-center mb-4"><Swords size={40} style={{ color: AMBER }} /></div>
+        <p className="font-mono text-[11px] tracking-[0.2em] mb-1" style={{ color: TEXT_MUTED }}>DÉFI DU JOUR — OBLIGATOIRE</p>
+        <h1 className="font-mono font-bold text-2xl mb-3">Le même examen pour tous</h1>
+        <p className="text-sm leading-relaxed mb-2" style={{ color: TEXT_MUTED }}>
+          Chaque jour, tout le monde affronte les mêmes questions. <strong style={{ color: TEXT }}>Chronométré, sans aide</strong> : un aperçu honnête de ton niveau réel, sous pression.
+        </p>
+        <p className="text-sm leading-relaxed mb-6" style={{ color: TEXT_MUTED }}>
+          Tu dois le relever pour accéder au reste aujourd'hui.
+        </p>
+        <button onClick={() => startDailyChallenge()} className="w-full py-3 rounded-lg font-mono text-sm mb-3 flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
+          <Play size={16} /> Commencer le défi
+        </button>
+        {!loggedIn ? (
+          <>
+            <button onClick={() => openModal("account")} className="w-full py-2 rounded-lg font-mono text-xs" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
+              J'ai déjà un compte — me connecter
+            </button>
+            <p className="text-[11px] font-mono mt-2" style={{ color: TEXT_MUTED }}>Déjà fait sur un autre appareil ? Connecte-toi pour le vérifier.</p>
+          </>
+        ) : (
+          <>
+            <button onClick={() => accountLogout()} className="w-full py-2 rounded-lg font-mono text-xs" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
+              Abandonner (me déconnecter)
+            </button>
+            <p className="text-[11px] font-mono mt-2" style={{ color: TEXT_MUTED }}>Abandonner te déconnecte — et le défi reste obligatoire.</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DailyView({ ctx }) {
-  const { dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, setView, profile, persist } = ctx;
+  const { dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, setView, profile, persist, submitDailyResult, authToken, openModal } = ctx;
   const [selected, setSelected] = useState(null);
   const [answered, setAnswered] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(DAILY_SECONDS_PER_Q);
 
-  if (!dailyRun || dailyQIdx >= dailyRun.length) {
-    const todayRef = getDailyReference();
+  // Seules les questions jouables (secteurs accessibles) comptent : une question
+  // d'un secteur réservé au pass est remplacée par une invitation à l'abonnement
+  // et exclue du score — le total du jour est donc le nombre de questions jouables.
+  const scorableTotal = (dailyRun || []).filter((x) => !x.locked).length;
+  const done = !dailyRun || dailyQIdx >= dailyRun.length;
+  const q = done ? null : dailyRun[dailyQIdx];
+  const isLocked = !done && !!q?.locked;
+
+  // Chrono par question : remis à zéro à chaque question, gelé dès qu'on a
+  // répondu ou sur une carte d'abonnement.
+  useEffect(() => {
+    if (done || answered || isLocked) return;
+    setTimeLeft(DAILY_SECONDS_PER_Q);
+    const t = setInterval(() => setTimeLeft((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [dailyQIdx, answered, isLocked, done]);
+
+  // À zéro : la question est comptée ratée (on révèle la bonne réponse sans
+  // créditer de point). Effet séparé pour ne pas faire d'effet de bord dans un updater.
+  useEffect(() => {
+    if (!done && !answered && !isLocked && timeLeft === 0) { setAnswered(true); SFX.wrong(); }
+  }, [timeLeft, answered, isLocked, done]);
+
+  function advance() {
+    const isLast = dailyQIdx + 1 >= dailyRun.length;
+    if (isLast) {
+      const ref = getDailyReference();
+      persist({
+        ...profile,
+        dailyRuns: { ...(profile.dailyRuns || {}), [ref]: { score: dailyScore, total: scorableTotal, completedISO: new Date().toISOString() } },
+      });
+      submitDailyResult?.(ref, dailyScore, scorableTotal);
+    }
+    setDailyQIdx((i) => i + 1);
+    setSelected(null);
+    setAnswered(false);
+  }
+
+  if (done) {
+    const pct = scorableTotal > 0 ? Math.round((dailyScore / scorableTotal) * 100) : 0;
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: BG, color: TEXT }}>
         <div className="text-center px-4">
@@ -2201,52 +2300,37 @@ function DailyView({ ctx }) {
             <Frame accent={AMBER} className="inline-block p-4">
               <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
                 <p className="font-mono text-xs tracking-widest mb-2" style={{ color: TEXT_MUTED }}>SCORE</p>
-                <p className="text-xl font-bold" style={{ color: AMBER }}>{dailyScore} / {dailyRun.length}</p>
-                <p className="text-xs mt-2" style={{ color: TEXT_MUTED }}>Graine: {getTodaysSeed().toString().slice(0, 8)}</p>
+                <p className="text-xl font-bold" style={{ color: AMBER }}>{dailyScore} / {scorableTotal} · {pct}%</p>
+                <p className="text-xs mt-2" style={{ color: TEXT_MUTED }}>Reviens demain pour le prochain défi.</p>
               </div>
             </Frame>
           </div>
-          <button onClick={() => setView("map")} className="px-4 py-2 rounded-lg font-mono" style={{ backgroundColor: AMBER, color: BG }}>
-            Retour à la Carte
-          </button>
+          <div className="flex items-center justify-center gap-2">
+            <button onClick={() => setView("leaderboard")} className="px-4 py-2 rounded-lg font-mono text-sm flex items-center gap-1.5" style={{ border: `1px solid ${AMBER}`, color: AMBER }}>
+              <Crown size={15} /> Classement
+            </button>
+            <button onClick={() => setView("map")} className="px-4 py-2 rounded-lg font-mono" style={{ backgroundColor: AMBER, color: BG }}>
+              Continuer
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  const q = dailyRun[dailyQIdx];
   function handleAnswer() {
     if (selected === null) return;
-    const correct = selected === q.correct;
-    if (correct) {
-      setDailyScore(s => s + 1);
-      SFX.correct(1);
-    } else {
-      SFX.wrong();
-    }
+    if (selected === q.correct) { setDailyScore((s) => s + 1); SFX.correct(1); }
+    else SFX.wrong();
     setAnswered(true);
   }
-  function handleNext() {
-    const isLast = dailyQIdx + 1 >= dailyRun.length;
-    if (isLast) {
-      const todayRef = getDailyReference();
-      persist({
-        ...profile,
-        dailyRuns: {
-          ...(profile.dailyRuns || {}),
-          [todayRef]: { score: dailyScore, total: dailyRun.length, completedISO: new Date().toISOString() },
-        },
-      });
-    }
-    setDailyQIdx(i => i + 1);
-    setSelected(null);
-    setAnswered(false);
-  }
+
+  const timeColor = timeLeft <= 10 ? DANGER : timeLeft <= 20 ? AMBER : SUCCESS;
 
   return (
     <div className="min-h-screen p-4" style={{ backgroundColor: BG, color: TEXT }}>
       <div className="max-w-xl mx-auto">
-        <div className="mb-6 flex justify-between items-center">
+        <div className="mb-3 flex justify-between items-center">
           <h3 className="font-mono text-sm font-bold" style={{ color: AMBER }}>DÉFI QUOTIDIEN</h3>
           <span className="font-mono text-xs" style={{ color: TEXT_MUTED }}>{dailyQIdx + 1} / {dailyRun.length}</span>
         </div>
@@ -2255,48 +2339,75 @@ function DailyView({ ctx }) {
             <div className="h-full rounded-full" style={{ width: `${((dailyQIdx + 1) / dailyRun.length) * 100}%`, backgroundColor: AMBER, transition: "width 300ms ease" }} />
           </div>
         </div>
-        <Frame accent={AMBER} className="p-4">
-          <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
-            <h4 className="font-mono font-bold mb-4">{q.prompt}</h4>
-            <div className="space-y-2">
-              {q.options?.map((opt, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => !answered && setSelected(idx)}
-                  className="w-full p-3 rounded-lg text-left transition-colors"
-                  style={{
-                    backgroundColor: selected === idx ? `${q.correct === idx ? SUCCESS : DANGER}22` : PANEL_SOFT,
-                    border: `1px solid ${selected === idx ? (q.correct === idx ? SUCCESS : DANGER) : LINE}`,
-                    color: TEXT,
-                  }}
-                  disabled={answered}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-            {!answered ? (
-              <button onClick={handleAnswer} disabled={selected === null} className="w-full mt-4 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: selected === null ? LINE : AMBER, color: selected === null ? TEXT_MUTED : BG }}>
-                Valider
+
+        {isLocked ? (
+          <Frame accent={AMBER} className="p-4">
+            <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm text-center">
+              <div className="flex justify-center mb-2"><Lock size={26} style={{ color: AMBER }} /></div>
+              <p className="font-mono text-xs tracking-widest mb-1" style={{ color: AMBER }}>SECTEUR RÉSERVÉ</p>
+              <h4 className="font-mono font-bold mb-2">Question d'un secteur avancé</h4>
+              <p className="text-xs leading-relaxed mb-4" style={{ color: TEXT_MUTED }}>
+                Elle fait partie de l'accès complet. Débloque-le pour l'affronter — elle ne compte pas contre ton score aujourd'hui.
+              </p>
+              <button onClick={() => openModal(authToken ? "pay" : "account")} className="w-full py-2 rounded-lg font-mono text-sm mb-2 flex items-center justify-center gap-1.5" style={{ backgroundColor: AMBER, color: BG }}>
+                <Unlock size={15} /> Débloquer l'accès
               </button>
-            ) : (
-              <>
-                {selected === q.correct ? (
-                  <p className="text-sm mt-3 font-mono" style={{ color: SUCCESS }}>✓ Correct!</p>
-                ) : (
-                  <>
-                    <p className="text-sm mt-3 font-mono" style={{ color: DANGER }}>✗ Incorrect</p>
-                    <p className="text-xs mt-1 font-mono" style={{ color: TEXT_MUTED }}>Réponse: {q.options[q.correct]}</p>
-                  </>
-                )}
-                {q.explain && <p className="text-xs mt-2 leading-relaxed" style={{ color: TEXT_MUTED }}>{q.explain}</p>}
-                <button onClick={handleNext} className="w-full mt-4 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: AMBER, color: BG }}>
-                  {dailyQIdx + 1 < dailyRun.length ? "Suivant →" : "Terminer"}
+              <button onClick={advance} className="w-full py-2 rounded-lg font-mono text-xs" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
+                Continuer →
+              </button>
+            </div>
+          </Frame>
+        ) : (
+          <Frame accent={AMBER} className="p-4">
+            <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
+              {/* Chrono */}
+              <div className="flex items-center gap-2 mb-3">
+                <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: LINE }}>
+                  <div className="h-full rounded-full" style={{ width: `${(timeLeft / DAILY_SECONDS_PER_Q) * 100}%`, backgroundColor: timeColor, transition: "width 1s linear" }} />
+                </div>
+                <span className="font-mono text-xs tabular-nums w-8 text-right" style={{ color: timeColor }}>{timeLeft}s</span>
+              </div>
+              <h4 className="font-mono font-bold mb-4">{q.prompt}</h4>
+              <div className="space-y-2">
+                {q.options?.map((opt, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => !answered && setSelected(idx)}
+                    className="w-full p-3 rounded-lg text-left transition-colors"
+                    style={{
+                      backgroundColor: (answered ? idx === q.correct : selected === idx) ? `${answered && idx === q.correct ? SUCCESS : selected === idx && idx !== q.correct ? DANGER : SUCCESS}22` : PANEL_SOFT,
+                      border: `1px solid ${answered ? (idx === q.correct ? SUCCESS : selected === idx ? DANGER : LINE) : selected === idx ? AMBER : LINE}`,
+                      color: TEXT,
+                    }}
+                    disabled={answered}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+              {!answered ? (
+                <button onClick={handleAnswer} disabled={selected === null} className="w-full mt-4 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: selected === null ? LINE : AMBER, color: selected === null ? TEXT_MUTED : BG }}>
+                  Valider
                 </button>
-              </>
-            )}
-          </div>
-        </Frame>
+              ) : (
+                <>
+                  {selected === q.correct ? (
+                    <p className="text-sm mt-3 font-mono" style={{ color: SUCCESS }}>✓ Correct!</p>
+                  ) : (
+                    <>
+                      <p className="text-sm mt-3 font-mono" style={{ color: DANGER }}>{selected === null ? "⏱ Temps écoulé" : "✗ Incorrect"}</p>
+                      <p className="text-xs mt-1 font-mono" style={{ color: TEXT_MUTED }}>Réponse: {q.options[q.correct]}</p>
+                    </>
+                  )}
+                  {q.explain && <p className="text-xs mt-2 leading-relaxed" style={{ color: TEXT_MUTED }}>{q.explain}</p>}
+                  <button onClick={advance} className="w-full mt-4 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: AMBER, color: BG }}>
+                    {dailyQIdx + 1 < dailyRun.length ? "Suivant →" : "Terminer"}
+                  </button>
+                </>
+              )}
+            </div>
+          </Frame>
+        )}
       </div>
     </div>
   );
@@ -4221,6 +4332,91 @@ function ParcoursView({ ctx }) {
   );
 }
 
+/* --- Classement plateforme : les meilleurs au Défi Quotidien --------- */
+function LeaderboardView({ ctx }) {
+  const { setView, authToken, authUser } = ctx;
+  const [state, setState] = useState({ busy: true, error: "", entries: [], me: null });
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const data = await apiJson("/api/v1/leaderboard", { token: authToken || undefined });
+        if (alive) setState({ busy: false, error: "", entries: data.entries || [], me: data.me || null });
+      } catch (e) {
+        if (alive) setState({ busy: false, error: friendlyError(e, "Le classement n'est pas disponible pour l'instant."), entries: [], me: null });
+      }
+    })();
+    return () => { alive = false; };
+  }, [authToken]);
+
+  const myName = authUser?.user?.displayName;
+  const medal = (r) => (r === 1 ? "🥇" : r === 2 ? "🥈" : r === 3 ? "🥉" : `#${r}`);
+  const inTop = state.me && state.entries.some((e) => e.rank === state.me.rank);
+
+  return (
+    <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+        <button onClick={() => setView("map")} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+          <ArrowLeft size={14} /> Retour à la carte
+        </button>
+
+        <div className="flex items-center gap-2 mb-1">
+          <Crown size={20} style={{ color: AMBER }} />
+          <h2 className="font-mono font-bold text-xl">Classement</h2>
+        </div>
+        <p className="text-sm mb-6 leading-relaxed" style={{ color: TEXT_MUTED }}>
+          Les meilleurs au Défi Quotidien — le même examen pour tous, chaque jour. Classé au cumul de bonnes réponses, départagé par la précision.
+        </p>
+
+        {state.busy && <p className="font-mono text-sm text-center py-8" style={{ color: TEXT_MUTED }}>Chargement…</p>}
+        {!state.busy && state.error && <p className="font-mono text-sm text-center py-8" style={{ color: DANGER }}>{state.error}</p>}
+        {!state.busy && !state.error && state.entries.length === 0 && (
+          <p className="font-mono text-sm text-center py-8" style={{ color: TEXT_MUTED }}>Aucun défi enregistré pour l'instant. Sois le premier à marquer le classement.</p>
+        )}
+
+        {!state.busy && !state.error && state.entries.length > 0 && (
+          <>
+            <div className="grid grid-cols-[2.5rem_1fr_auto] gap-2 px-3 mb-2 font-mono text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>
+              <span>RANG</span><span>JOUEUR</span><span className="text-right">PTS · JOURS · PRÉC.</span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {state.entries.map((e) => {
+                const isMe = myName && e.displayName === myName;
+                return (
+                  <div key={`${e.rank}-${e.displayName}`} className="grid grid-cols-[2.5rem_1fr_auto] gap-2 items-center px-3 py-2 rounded-lg"
+                    style={{ backgroundColor: isMe ? `${AMBER}18` : PANEL, border: `1px solid ${isMe ? AMBER : LINE}` }}>
+                    <span className="font-mono text-sm font-bold" style={{ color: e.rank <= 3 ? AMBER : TEXT_MUTED }}>{medal(e.rank)}</span>
+                    <span className="font-mono text-sm truncate" style={{ color: TEXT }}>{e.displayName}{isMe && <span style={{ color: AMBER }}> · toi</span>}</span>
+                    <span className="font-mono text-xs text-right" style={{ color: TEXT_MUTED }}>
+                      <strong style={{ color: TEXT }}>{e.points}</strong> · {e.days}j · {Math.round((e.accuracy || 0) * 100)}%
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Rang de l'appelant s'il est hors du top affiché */}
+            {state.me && !inTop && (
+              <div className="mt-3 grid grid-cols-[2.5rem_1fr_auto] gap-2 items-center px-3 py-2 rounded-lg" style={{ backgroundColor: `${AMBER}18`, border: `1px solid ${AMBER}` }}>
+                <span className="font-mono text-sm font-bold" style={{ color: AMBER }}>#{state.me.rank}</span>
+                <span className="font-mono text-sm truncate" style={{ color: TEXT }}>{myName || "Toi"}<span style={{ color: AMBER }}> · toi</span></span>
+                <span className="font-mono text-xs text-right" style={{ color: TEXT_MUTED }}>
+                  <strong style={{ color: TEXT }}>{state.me.points}</strong> · {state.me.days}j · {Math.round((state.me.accuracy || 0) * 100)}%
+                </span>
+              </div>
+            )}
+          </>
+        )}
+
+        {!authToken && !state.busy && (
+          <p className="font-mono text-[11px] text-center mt-5" style={{ color: TEXT_MUTED }}>Crée un compte pour apparaître au classement.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* --- Carte du monde : parcours des secteurs -------------------------- */
 function MapView({ ctx }) {
   const {
@@ -4391,15 +4587,16 @@ function MapView({ ctx }) {
           )}
         </div>
 
-        {/* Daily Challenge & SRS Quick Access */}
+        {/* Classement & Révisions (le Défi du Jour, désormais obligatoire, est
+            relevé avant même d'atteindre la carte — plus de bouton de lancement ici). */}
         <div className="mt-6 grid grid-cols-2 gap-3 mb-3">
           <button
-            onClick={() => ctx.startDailyChallenge?.()}
+            onClick={() => setView("leaderboard")}
             className="p-4 rounded-lg text-center transition-colors hover:opacity-80"
             style={{ backgroundColor: `${AMBER}22`, border: `1px solid ${AMBER}` }}
           >
-            <p className="font-mono text-xs tracking-widest mb-1" style={{ color: AMBER }}>⭐ DÉFI</p>
-            <p className="text-xs" style={{ color: TEXT }}>Graine: {getTodaysSeed().toString().slice(0, 6)}</p>
+            <p className="font-mono text-xs tracking-widest mb-1" style={{ color: AMBER }}>🏆 CLASSEMENT</p>
+            <p className="text-xs" style={{ color: TEXT }}>Les meilleurs du jour</p>
           </button>
           <button
             onClick={() => ctx.startSrsSession?.()}
@@ -5115,6 +5312,7 @@ export default function FullstackQuest() {
   const [dailyRun, setDailyRun] = useState(null);
   const [dailyQIdx, setDailyQIdx] = useState(0);
   const [dailyScore, setDailyScore] = useState(0);
+  const [dailyStartMs, setDailyStartMs] = useState(0);
 
   // SRS Spaced Repetition
   const [srsSessionItems, setSrsSessionItems] = useState([]);
@@ -5143,11 +5341,13 @@ export default function FullstackQuest() {
         local = null;
       }
 
+      let dailyDoneServer = false;
       if (authToken) {
         setSyncStatus("Synchronisation du compte…");
         try {
           const me = await apiJson("/api/v1/auth/me", { token: authToken });
           setAuthUser(me);
+          dailyDoneServer = !!me?.access?.dailyDoneToday;
           const remote = await apiJson("/api/v1/me/profile", { token: authToken });
           if (remote?.profile) {
             local = withMigratedSrs(mergeProfiles(local, remote.profile));
@@ -5168,7 +5368,11 @@ export default function FullstackQuest() {
         }
       }
 
-      setProfile(withMigratedSrs(local || { ...FRESH }));
+      // Défi déjà fait sur un autre appareil (serveur frais) → on le reflète
+      // dans l'état daté local, seule source du gate (jamais le cache d'access).
+      let base = local || { ...FRESH };
+      if (dailyDoneServer) base = markDailyDoneLocally(base);
+      setProfile(withMigratedSrs(base));
     })();
   }, []);
 
@@ -5298,6 +5502,10 @@ export default function FullstackQuest() {
     try {
       const me = await apiJson("/api/v1/auth/me", { token: authToken });
       setAuthUser(me);
+      if (profile && me?.access?.dailyDoneToday) {
+        const marked = markDailyDoneLocally(profile);
+        if (marked !== profile) persist(marked);
+      }
       return me;
     } catch (e) {
       if (e?.status === 401) { setAuthToken(""); setAuthUser(null); }
@@ -5314,7 +5522,10 @@ export default function FullstackQuest() {
     setAuthUser({ user: data.user, access: data.access });
     try {
       const remote = await apiJson("/api/v1/me/profile", { token: data.token });
-      const merged = withMigratedSrs(mergeProfiles(profile, remote?.profile));
+      let merged = withMigratedSrs(mergeProfiles(profile, remote?.profile));
+      // S'authentifier vérifie le défi : s'il est déjà fait (ici ou ailleurs),
+      // le gate se lève immédiatement via l'état daté local.
+      if (data.access?.dailyDoneToday) merged = markDailyDoneLocally(merged);
       setProfile(merged);
       try { await window.storage.set(STORAGE_KEY, JSON.stringify(merged)); } catch { /* best-effort */ }
       await apiJson("/api/v1/me/profile", { token: data.token, method: "PUT", body: { profile: merged } });
@@ -5349,10 +5560,13 @@ export default function FullstackQuest() {
   // même fusion sans perte, pour que rien de joué hors-ligne ne soit écrasé.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const onOnline = () => { accountSyncNow(); };
+    const onOnline = () => { accountSyncNow(); flushPendingDaily(); };
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
   }, [authToken, profile]);
+
+  // Au montage et à chaque (re)connexion : tente d'envoyer un défi resté en file.
+  useEffect(() => { flushPendingDaily(); }, [authToken]);
 
   /* --- Paiement du pass (PayMe : checkout puis polling) ------------------ */
 
@@ -5547,11 +5761,56 @@ export default function FullstackQuest() {
       setAda("Tu as déjà relevé le défi d'aujourd'hui! Reviens demain.", "idle");
       return;
     }
-    const run = generateDailyRun(dailySeed, MODULES);
+    // Une question tirée d'un secteur réservé au pass devient une carte
+    // d'invitation à l'abonnement (non jouable, hors score) — voir DailyView.
+    const run = generateDailyRun(dailySeed, MODULES).map((item) => ({
+      ...item,
+      locked: ADVANCED_TIER.includes(item.moduleId) && !hasPass,
+    }));
     setDailyRun(run);
     setDailyQIdx(0);
     setDailyScore(0);
+    setDailyStartMs(Date.now());
     setView("daily");
+  }
+
+  /* --- Défi Quotidien : envoi serveur (classement) + file offline -------- */
+  async function postDaily(payload) {
+    try {
+      await apiJson("/api/v1/daily/submit", { token: authToken, method: "POST", body: payload });
+      return true;
+    } catch (e) {
+      // 409 = ce n'est plus le défi d'aujourd'hui : inutile de garder en file.
+      return e?.status === 409;
+    }
+  }
+
+  async function submitDailyResult(ref, score, total) {
+    if (!authToken) return; // invité : joué localement, hors classement
+    const payload = { reference: ref, score, total, durationMs: dailyStartMs ? Date.now() - dailyStartMs : 0 };
+    const ok = await postDaily(payload);
+    try {
+      if (ok) window.localStorage.removeItem(PENDING_DAILY_KEY);
+      else window.localStorage.setItem(PENDING_DAILY_KEY, JSON.stringify(payload));
+    } catch { /* best-effort */ }
+    if (ok) refreshMe();
+  }
+
+  // Rejoue un résultat de défi resté en file (soumis hors-ligne).
+  async function flushPendingDaily() {
+    if (!authToken) return;
+    let payload = null;
+    try {
+      const raw = window.localStorage.getItem(PENDING_DAILY_KEY);
+      payload = raw ? JSON.parse(raw) : null;
+    } catch { payload = null; }
+    if (!payload) return;
+    if (payload.reference !== getDailyReference()) {
+      try { window.localStorage.removeItem(PENDING_DAILY_KEY); } catch { /* ignore */ }
+      return;
+    }
+    const ok = await postDaily(payload);
+    if (ok) { try { window.localStorage.removeItem(PENDING_DAILY_KEY); } catch { /* ignore */ } refreshMe(); }
   }
 
   function startSrsSession() {
@@ -6010,7 +6269,7 @@ export default function FullstackQuest() {
     parcours, runParcoursAction,
     isUnlocked, startModule, engage, backToMap, resetProgress,
     selectAnswer, runTests, moveLine, validateOrder, nextQuestion,
-    dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, startDailyChallenge,
+    dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, startDailyChallenge, submitDailyResult,
     srsSessionItems, srsSessionIdx, setSrsSessionIdx, startSrsSession, persist,
     toggleMilestone,
     qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, startQualificationExam, finishQualificationExam,
@@ -6028,6 +6287,17 @@ export default function FullstackQuest() {
   // ModalsHost rend les modales globales (sauvegarde, compte, paiement…)
   // par-dessus la vue courante, quelle qu'elle soit.
   const chrome = <><ModalsHost ctx={ctx} /><InstallPrompt /></>;
+
+  // Gate obligatoire : tant que le Défi du Jour n'est pas fait, il barre l'accès
+  // au reste (anti-fuite). Exceptions : le défi lui-même et la console admin
+  // (lien direct protégé par clé). Le gate ne lit que l'état daté local
+  // (dailyRuns[jour]), alimenté aussi par le serveur pour le cross-appareil.
+  const dailyRef = getDailyReference();
+  const dailyDone = !!profile.dailyRuns?.[dailyRef];
+  if (!dailyDone && view !== "daily" && view !== "admin") {
+    return <><DailyGateView ctx={ctx} />{chrome}</>;
+  }
+
   if (view === "admin") return <>{adminKey ? <AdminView ctx={ctx} /> : <AdminGateView ctx={ctx} />}{chrome}</>;
   if (view === "codex") return <><CodexView ctx={ctx} />{chrome}</>;
   if (view === "intro") return <><IntroView ctx={ctx} />{chrome}</>;
@@ -6040,6 +6310,7 @@ export default function FullstackQuest() {
   if (view === "technical") return <><TechnicalView ctx={ctx} />{chrome}</>;
   if (view === "skills") return <><SkillProfileView ctx={ctx} />{chrome}</>;
   if (view === "parcours") return <><ParcoursView ctx={ctx} />{chrome}</>;
+  if (view === "leaderboard") return <><LeaderboardView ctx={ctx} />{chrome}</>;
   return <><MapView ctx={ctx} />{chrome}</>;
 }
 
