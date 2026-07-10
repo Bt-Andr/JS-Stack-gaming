@@ -71,6 +71,19 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   PRIMARY KEY (user_id, day)
 );
 
+-- Défi Quotidien : un examen commun (même graine pour tous chaque jour). Une
+-- seule tentative comptée par jour (l'exam), base du classement plateforme.
+CREATE TABLE IF NOT EXISTS daily_results (
+  user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day         date NOT NULL,
+  score       int  NOT NULL,
+  total       int  NOT NULL,
+  duration_ms bigint NOT NULL DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_results_day ON daily_results (day);
+
 CREATE TABLE IF NOT EXISTS app_settings (
   key        text PRIMARY KEY,
   value      jsonb NOT NULL,

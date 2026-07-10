@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 import accounts
 import core
+import daily as daily_routes
 import payments as payments_routes
 import support as support_routes
 
@@ -78,6 +79,7 @@ ACCOUNT_RE = re.compile(r"^[a-zA-Z0-9_-]{3,32}$")
 app.include_router(accounts.router)
 app.include_router(payments_routes.router)
 app.include_router(support_routes.router)
+app.include_router(daily_routes.router)
 
 
 @app.on_event("startup")

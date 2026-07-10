@@ -125,6 +125,9 @@ async def access_info(user_id: uuid.UUID) -> Dict[str, Any]:
     pool = await core.get_pool()
     async with pool.acquire() as conn:
         used = await conn.fetchval("SELECT hints FROM ai_usage WHERE user_id = $1 AND day = CURRENT_DATE", user_id)
+        daily_done = await conn.fetchval(
+            "SELECT true FROM daily_results WHERE user_id = $1 AND day = (now() at time zone 'utc')::date", user_id
+        )
     return {
         "hasPass": exp is not None,
         "passExpiresAt": exp.isoformat() if exp else None,
@@ -132,6 +135,9 @@ async def access_info(user_id: uuid.UUID) -> Dict[str, Any]:
         "aiUsedToday": int(used or 0),
         "passPriceXaf": int(settings["passPriceXaf"]),
         "passDays": int(settings["passDays"]),
+        # Le client force le défi tant que ce n'est pas fait (gate anti-fuite) ;
+        # renvoyé ici, il tient donc à la connexion et sur tous les appareils.
+        "dailyDoneToday": bool(daily_done),
     }
 
 
