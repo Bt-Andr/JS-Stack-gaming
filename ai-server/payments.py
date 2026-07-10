@@ -456,6 +456,53 @@ async def admin_payment_detail(payment_id: str, x_admin_key: Optional[str] = Hea
     }
 
 
+class CompPassIn(BaseModel):
+    email: str
+    days: Optional[int] = None
+    note: Optional[str] = None
+
+
+@router.post("/api/v1/admin/passes")
+async def admin_grant_pass(body: CompPassIn, x_admin_key: Optional[str] = Header(default=None)):
+    """Crédite manuellement un pass d'accès à un compte, par email. Sert au
+    support (créditer un joueur dont le paiement a abouti chez PayMe mais pas en
+    base, geste commercial, code promo) et aux tests de bout en bout. Le pass se
+    cumule sur un pass existant, exactement comme un achat ; tracé source='admin'
+    (jamais rattaché à un paiement)."""
+    core.require_admin(x_admin_key)
+    core.require_db()
+    email = (body.email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email requis.")
+    settings = await core.get_settings()
+    days = int(body.days) if body.days is not None else int(settings["passDays"])
+    if days < 1 or days > 3650:
+        raise HTTPException(status_code=400, detail="Durée invalide (1 à 3650 jours).")
+    pool = await core.get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            user = await conn.fetchrow(
+                "SELECT id, email, display_name FROM users WHERE lower(email)=$1", email
+            )
+            if user is None:
+                raise HTTPException(status_code=404, detail="Aucun compte avec cet email.")
+            current = await conn.fetchval("SELECT max(expires_at) FROM passes WHERE user_id=$1", user["id"])
+            base = current if current and current > _now() else _now()
+            expires = base + timedelta(days=days)
+            await conn.execute(
+                "INSERT INTO passes (user_id, starts_at, expires_at, source, payment_id) "
+                "VALUES ($1, now(), $2, 'admin', NULL)",
+                user["id"], expires,
+            )
+    logger.info("Pass admin crédité à %s jusqu'au %s (note: %s)",
+                email, expires.isoformat(), (body.note or "")[:120])
+    return {
+        "email": user["email"], "displayName": user["display_name"],
+        "days": days, "expiresAt": expires.isoformat(),
+        "stacked": bool(current and current > _now()),
+    }
+
+
 class SettingsPatch(BaseModel):
     passPriceXaf: Optional[int] = None
     passDays: Optional[int] = None

@@ -2448,6 +2448,31 @@ function AdminView({ ctx }) {
     }
   }
 
+  // Offrir un pass : geste commercial, litige ("payé chez PayMe mais rien débloqué"),
+  // ou compte de test. Cumulable comme un achat, tracé source='admin'.
+  const [grantEmail, setGrantEmail] = useState("");
+  const [grantDays, setGrantDays] = useState("");
+  const [grantBusy, setGrantBusy] = useState(false);
+  const [grantResult, setGrantResult] = useState(null);
+
+  async function grantPass() {
+    const email = grantEmail.trim();
+    if (!email) return;
+    setGrantBusy(true);
+    setGrantResult(null);
+    try {
+      const body = { email };
+      if (grantDays.trim()) body.days = parseInt(grantDays.trim(), 10);
+      const res = await adminFetch("/api/v1/admin/passes", adminKey, { method: "POST", body: JSON.stringify(body) });
+      setGrantResult(res);
+      loadPayments();
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setGrantBusy(false);
+    }
+  }
+
   // Support : plaintes des joueurs, potentiellement liées à un paiement ci-dessus.
   const [tickets, setTickets] = useState([]);
   const [ticketsBusy, setTicketsBusy] = useState(false);
@@ -3070,6 +3095,22 @@ function AdminView({ ctx }) {
           </div>
         ) : tab === "payments" ? (
           <div className="flex flex-col gap-4">
+            {/* Offrir un pass : litige ("payé mais rien débloqué"), geste commercial, ou compte de test. */}
+            <div className="p-3 rounded-lg" style={{ backgroundColor: PANEL, border: `1px solid ${LINE}` }}>
+              <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: "#8ECAE6" }}>🎁 OFFRIR UN PASS</p>
+              <div className="flex gap-2 flex-wrap items-center">
+                <input value={grantEmail} onChange={(e) => setGrantEmail(e.target.value)} placeholder="Email du compte" className="flex-1 min-w-[160px] px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
+                <input value={grantDays} onChange={(e) => setGrantDays(e.target.value)} placeholder="jours" title="Durée en jours (défaut : la durée du pass configurée)" className="w-20 px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
+                <button onClick={grantPass} disabled={grantBusy || !grantEmail.trim()} className="px-3 py-1.5 rounded-md font-mono text-xs" style={{ backgroundColor: grantBusy || !grantEmail.trim() ? PANEL_SOFT : AMBER, color: grantBusy || !grantEmail.trim() ? TEXT_MUTED : BG, border: `1px solid ${AMBER}` }}>
+                  {grantBusy ? "…" : "Créditer"}
+                </button>
+              </div>
+              {grantResult && (
+                <p className="text-[11px] font-mono mt-2" style={{ color: SUCCESS }}>
+                  ✓ {grantResult.email} · +{grantResult.days} j{grantResult.stacked ? " (cumulé)" : ""} · actif jusqu'au {new Date(grantResult.expiresAt).toLocaleDateString("fr-FR")}
+                </p>
+              )}
+            </div>
             <div className="flex gap-2 flex-wrap">
               <input value={paymentFilterEmail} onChange={(e) => setPaymentFilterEmail(e.target.value)} placeholder="Filtrer par email" className="flex-1 min-w-[160px] px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
               <select value={paymentFilterStatus} onChange={(e) => setPaymentFilterStatus(e.target.value)} className="px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={selectStyle}>
