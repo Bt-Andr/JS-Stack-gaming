@@ -12,6 +12,7 @@ d'accès** payé par Mobile Money (PayMe), rattaché à un **compte joueur**.
 | `AUTH_JWT_SECRET` | Signe les JWT des comptes joueurs. Sans elle : routes compte en 503 et **la banque ne sert que la fondation à tout le monde**. | Oui |
 | `PAYMENT_GATEWAY_ENCRYPTION_SECRET` | Chiffre (AES-256-GCM) le mot de passe PayMe et le token de session stockés en base. Ne jamais la changer sans re-saisir le mot de passe PayMe dans l'admin. | Oui pour le paiement |
 | `PAYGATE_SANDBOX` | `1` = les checkouts réussissent tout seuls après ~8 s, sans appeler PayMe. Pour tester le flux de bout en bout. **Ne jamais laisser à 1 en production.** | Non |
+| `AI_API_KEY` | Clé partagée de la voie admin/tests vers `/generate` et `/review`. Les joueurs n'en ont pas besoin (ils passent par leur compte + pass). Depuis le durcissement *fail-safe* : en mode produit (comptes + base configurés), un appel IA **sans compte à pass actif** est refusé, et cette clé est la seule autre voie — la poser permet à l'admin de tester le coach depuis la console. Sans elle, la voie admin/tests est simplement fermée (les joueurs, eux, fonctionnent). | Recommandée |
 
 Déjà en place : `DATABASE_URL` (Neon — héberge désormais aussi users, passes,
 payments, ai_usage), `ADMIN_API_KEY`, `AI_PROVIDER`/clés IA, `AI_ALLOWED_ORIGINS`.

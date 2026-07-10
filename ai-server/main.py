@@ -292,6 +292,14 @@ async def _authorize_ai_call(authorization: Optional[str], x_api_key: Optional[s
         if used is None:
             raise HTTPException(status_code=429, detail=f"Quota d'indices du jour atteint ({daily_limit}/jour) — il se recharge demain.")
     else:
+        # Aucun compte résolu (pas de Bearer, ou token invalide). En mode produit
+        # (comptes + base configurés), le coach/revue IA passe TOUJOURS par un
+        # compte à pass actif ; la seule voie sans compte est la clé partagée
+        # d'admin/tests. Si cette clé n'est même pas configurée, on refuse au lieu
+        # de servir un proxy IA ouvert : oublier AI_API_KEY doit fermer l'accès,
+        # pas l'ouvrir (le budget modèle est en jeu).
+        if accounts.auth_configured() and not AI_API_KEY:
+            raise HTTPException(status_code=401, detail="Connecte-toi à ton compte pour utiliser le coach IA.")
         _auth(x_api_key)
     return user
 
