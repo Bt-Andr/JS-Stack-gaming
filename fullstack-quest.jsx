@@ -1308,7 +1308,14 @@ function applyRemoteBank(remoteQuestions) {
   let applied = 0;
   for (const mod of MODULES) {
     const remotes = (byModule.get(mod.id) || []).sort((a, b) => (a.id < b.id ? -1 : 1)).map(mapRemoteQuestion);
-    mod.questions = [...mod.staticQuestions, ...remotes];
+    // La banque fait autorité : une question statique du bundle dont la banque
+    // sert une version (même énoncé) est masquée. Sans ça, l'import des secteurs
+    // avancés dans la banque (Phase B) ferait voir chaque question EN DOUBLE aux
+    // joueurs à pass actif (statique + copie distante). Effet de bord voulu :
+    // une édition admin d'une question déjà dans le bundle prime désormais.
+    const remotePrompts = new Set(remotes.map((q) => q.prompt.trim()));
+    const statics = mod.staticQuestions.filter((q) => !remotePrompts.has(q.prompt.trim()));
+    mod.questions = [...statics, ...remotes];
     applied += remotes.length;
   }
   return applied;
