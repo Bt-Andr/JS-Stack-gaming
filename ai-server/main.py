@@ -390,7 +390,10 @@ async def put_profile(account: str, body: ProfilePut, x_profile_pin: Optional[st
 # ---------------------------------------------------------------------------
 
 VALID_MODULES = {"js-fond", "js-avance", "async", "ts", "react", "next", "express", "vite", "boss"}
-VALID_QTYPES = {"qcm", "code", "order"}
+# "refactor" : même forme technique que "code" (starter + tests) mais le starter
+# est un code qui marche DÉJÀ ; l'exercice est de le rendre propre sans casser
+# les tests, la revue de qualité étant la vraie récompense.
+VALID_QTYPES = {"qcm", "code", "order", "refactor"}
 VALID_STATUSES = {"active", "disabled"}
 
 # Le schéma (questions + comptes + paiements) et le pool vivent dans core.py.
@@ -428,7 +431,7 @@ def _validate_question(q: QuestionIn) -> Dict[str, Any]:
     if q.moduleId not in VALID_MODULES:
         bad(f"moduleId invalide: {q.moduleId!r} (attendu: {', '.join(sorted(VALID_MODULES))})")
     if q.qtype not in VALID_QTYPES:
-        bad(f"qtype invalide: {q.qtype!r} (attendu: qcm, code ou order)")
+        bad(f"qtype invalide: {q.qtype!r} (attendu: qcm, code, refactor ou order)")
     prompt = (q.prompt or "").strip()
     if not prompt:
         bad("prompt est requis.")
@@ -447,13 +450,14 @@ def _validate_question(q: QuestionIn) -> Dict[str, Any]:
         payload["correct"] = q.correct
         if q.code and q.code.strip():
             payload["code"] = q.code
-    elif q.qtype == "code":
+    elif q.qtype in ("code", "refactor"):
+        label = "refactor" if q.qtype == "refactor" else "code"
         if not q.starter or not q.starter.strip():
-            bad("Un exercice code exige un champ starter.")
+            bad(f"Un exercice {label} exige un champ starter (pour refactor : le code déjà fonctionnel à améliorer).")
         tests = q.tests or []
         if not tests or any(not isinstance(t, dict) or not str(t.get("call", "")).strip() or "expect" not in t for t in tests):
-            bad("Un exercice code exige au moins un test de forme {call, expect}.")
-        payload["type"] = "code"
+            bad(f"Un exercice {label} exige au moins un test de forme {{call, expect}}.")
+        payload["type"] = q.qtype
         payload["starter"] = q.starter
         payload["tests"] = [{"call": str(t["call"]), "expect": t["expect"]} for t in tests]
     else:  # order

@@ -70,8 +70,12 @@ bank in localStorage and falls back to static questions without network).
    deliberately distinct from `AI_API_KEY`: the public key must never grant
    write access to the bank).
 3. In the app, open the map's "Administration" panel, paste the admin key, and
-   use the admin view to author QCM / code / order questions. Code exercises
-   can't be published until a reference solution passes their tests.
+   use the admin view to author QCM / code / refactor / order questions. Code and
+   refactor exercises can't be published until a reference solution passes their
+   tests. A **refactor** exercise ships a working-but-messy `starter` that must
+   already pass the tests — the player cleans it up without breaking them, and
+   the AI code review verdict is the reward. Only QCM questions feed the Daily
+   Challenge and the Qualification exam (those views have no code editor).
 
 Verification after deploy: `curl https://<render-url>/api/v1/questions` should
 return `{"questions":[]}` (or your questions). Empty env vars -> clean 503s and

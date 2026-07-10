@@ -219,6 +219,17 @@ const MODULES = [
         explain: "L'optional chaining permet de \"descendre\" dans une chaîne de propriétés en toute sécurité : si user ou user.address est null/undefined, l'expression s'arrête et renvoie undefined plutôt que de lever une erreur."
       },
       {
+        type: "refactor",
+        prompt: "Ce code marche mais il est écrit à l'ancienne. Rends-le idiomatique (ES6+) sans changer son comportement : les tests doivent rester verts.",
+        starter: "function pairsDoubles(arr) {\n  var out = [];\n  for (var i = 0; i < arr.length; i++) {\n    if (arr[i] % 2 == 0) {\n      out.push(arr[i] * 2);\n    }\n  }\n  return out;\n}",
+        tests: [
+          { call: "pairsDoubles([1, 2, 3, 4])", expect: [4, 8] },
+          { call: "pairsDoubles([1, 3, 5])", expect: [] },
+          { call: "pairsDoubles([2, 4, 6])", expect: [4, 8, 12] },
+        ],
+        explain: "Une version idiomatique : const pairsDoubles = (arr) => arr.filter((n) => n % 2 === 0).map((n) => n * 2). const au lieu de var, une arrow function, et filter+map qui disent l'intention (« garder les pairs, puis les doubler ») là où la boucle for la cachait.",
+      },
+      {
         type: "code",
         technical: true,
         prompt: "Écris une fonction pairs(arr) qui renvoie un NOUVEAU tableau avec uniquement les nombres pairs.",
@@ -1243,7 +1254,7 @@ const BANK_CACHE_KEY = "fullstack-quest-remote-bank";
 function isUsableRemote(r) {
   if (!r || !r.id || !r.prompt || !MODULES.some((m) => m.id === r.moduleId)) return false;
   if (r.qtype === "qcm") return Array.isArray(r.options) && r.options.length >= 2 && Number.isInteger(r.correct) && r.correct >= 0 && r.correct < r.options.length;
-  if (r.qtype === "code") return typeof r.starter === "string" && Array.isArray(r.tests) && r.tests.length > 0;
+  if (r.qtype === "code" || r.qtype === "refactor") return typeof r.starter === "string" && Array.isArray(r.tests) && r.tests.length > 0;
   if (r.qtype === "order") return Array.isArray(r.lines) && r.lines.length >= 2;
   return false;
 }
@@ -1254,8 +1265,8 @@ function mapRemoteQuestion(r) {
   if (r.qtype === "qcm") {
     q.options = r.options; q.correct = r.correct;
     if (r.code) q.code = r.code;
-  } else if (r.qtype === "code") {
-    q.type = "code"; q.starter = r.starter; q.tests = r.tests;
+  } else if (r.qtype === "code" || r.qtype === "refactor") {
+    q.type = r.qtype; q.starter = r.starter; q.tests = r.tests;
   } else {
     q.type = "order"; q.lines = r.lines;
   }
@@ -1471,11 +1482,18 @@ function getDailyReference() {
   return `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}-${String(today.getUTCDate()).padStart(2, "0")}`;
 }
 
+// Le Défi Quotidien et l'Examen ne savent afficher que des QCM (pas d'éditeur
+// de code ni de réordonnancement) : on ne tire que ces questions-là.
+function isQcm(q) {
+  return !q.type || q.type === "qcm";
+}
+
 function generateDailyRun(seed, modules) {
   const r = rng(seed);
   const picked = [];
   for (const mod of modules) {
-    const pool = getBattleQuestions(mod);
+    const pool = getBattleQuestions(mod).filter(isQcm);
+    if (pool.length === 0) continue;
     const qIdx = Math.floor(r() * pool.length);
     const q = pool[qIdx];
     picked.push({ ...q, moduleId: mod.id, moduleName: mod.title });
@@ -2540,14 +2558,15 @@ function AdminView({ ctx }) {
     }
   }
 
-  const solutionOk = form.qtype !== "code" || (solResults && solResults.length > 0 && solResults.every((r) => r.pass));
+  const isCodeLike = form.qtype === "code" || form.qtype === "refactor";
+  const solutionOk = !isCodeLike || (solResults && solResults.length > 0 && solResults.every((r) => r.pass));
 
   function buildBody() {
-    const body = { moduleId: form.moduleId, qtype: form.qtype, technical: form.qtype === "code" ? form.technical : false, prompt: form.prompt, explain: form.explain };
+    const body = { moduleId: form.moduleId, qtype: form.qtype, technical: isCodeLike ? form.technical : false, prompt: form.prompt, explain: form.explain };
     if (form.qtype === "qcm") {
       body.options = form.options; body.correct = form.correct;
       if (form.code.trim()) body.code = form.code;
-    } else if (form.qtype === "code") {
+    } else if (isCodeLike) {
       body.starter = form.starter; body.tests = parsedTests();
     } else {
       body.lines = form.lines;
@@ -3062,6 +3081,7 @@ function AdminView({ ctx }) {
                   <select value={form.qtype} onChange={(e) => f({ qtype: e.target.value })} className="px-2 py-2 rounded-md text-sm focus:outline-none" style={selectStyle}>
                     <option style={optStyle} value="qcm">QCM</option>
                     <option style={optStyle} value="code">Exercice code</option>
+                    <option style={optStyle} value="refactor">Refactor (code à assainir)</option>
                     <option style={optStyle} value="order">Remise en ordre</option>
                   </select>
                 </label>
@@ -3092,13 +3112,18 @@ function AdminView({ ctx }) {
                 </>
               )}
 
-              {form.qtype === "code" && (
+              {isCodeLike && (
                 <>
                   <label className="flex items-center gap-2 text-xs font-mono" style={{ color: TEXT_MUTED }}>
                     <input type="checkbox" checked={form.technical} onChange={(e) => f({ technical: e.target.checked })} />
                     Épreuve Technique (hors combat normal)
                   </label>
-                  <label className="flex flex-col gap-1">{label("CODE DE DÉPART (STARTER)")}
+                  {form.qtype === "refactor" && (
+                    <p className="text-[11px] leading-relaxed p-2 rounded" style={{ backgroundColor: `${AMBER}14`, color: TEXT_MUTED }}>
+                      Refactor : le <b>starter</b> est un code qui marche déjà mais qui reste à améliorer (nommage confus, duplication, imbrication…). Les tests doivent passer AVEC le starter tel quel — la solution de référence ci-dessous sert à le prouver (colle simplement le starter).
+                    </p>
+                  )}
+                  <label className="flex flex-col gap-1">{label(form.qtype === "refactor" ? "CODE À ASSAINIR (STARTER — doit déjà passer les tests)" : "CODE DE DÉPART (STARTER)")}
                     <textarea value={form.starter} onChange={(e) => f({ starter: e.target.value })} rows={4} spellCheck={false} className="px-2 py-2 rounded-md font-mono text-xs resize-y focus:outline-none" style={inputStyle} />
                   </label>
                   {label("TESTS — attendu en JSON (4, \"abc\", [2,4]…)")}
@@ -3162,7 +3187,7 @@ function AdminView({ ctx }) {
               >
                 {saveBusy ? "Publication…" : editingId ? "Mettre à jour" : "Publier dans la banque"}
               </button>
-              {form.qtype === "code" && !solutionOk && (
+              {isCodeLike && !solutionOk && (
                 <p className="text-[10px] font-mono text-center" style={{ color: TEXT_MUTED }}>
                   Publication bloquée tant qu'une solution de référence ne passe pas tous les tests.
                 </p>
@@ -4083,7 +4108,7 @@ function BattleView({ ctx }) {
   const isLast = qIdx === battleQuestions.length - 1;
   const critical = bossHP <= 0.5;
   const success =
-    q.type === "code" ? selected === "code"
+    q.type === "code" || q.type === "refactor" ? selected === q.type
     : q.type === "order" ? (answered && orderWork.every((v, idx) => v === idx))
     : selected === q.correct;
 
@@ -4234,9 +4259,15 @@ function BattleView({ ctx }) {
               </div>
             )}
 
-            {/* ----- DÉFI CODE ----- */}
-            {q.type === "code" && (
+            {/* ----- DÉFI CODE / REFACTOR ----- */}
+            {(q.type === "code" || q.type === "refactor") && (
               <div>
+                {q.type === "refactor" && (
+                  <div className="mb-3 p-2.5 rounded-md text-xs leading-relaxed" style={{ backgroundColor: `${AMBER}14`, border: `1px solid ${AMBER}55`, color: TEXT }}>
+                    <span className="font-mono font-bold" style={{ color: AMBER }}>♻ REFACTOR — </span>
+                    ce code fonctionne déjà (les tests passent). Ta mission : le rendre plus propre et lisible <span style={{ color: AMBER }}>sans casser un seul test</span>. Puis fais-le relire par ADA — le verdict « propre » est la vraie victoire.
+                  </div>
+                )}
                 <textarea
                   value={codeInput}
                   onChange={(e) => setCodeInput(e.target.value)}
@@ -4250,7 +4281,7 @@ function BattleView({ ctx }) {
                   <button onClick={runTests}
                     className="w-full mt-3 py-2.5 rounded-md font-mono font-bold text-sm flex items-center justify-center gap-2"
                     style={{ backgroundColor: SUCCESS, color: "#0B2545" }}>
-                    <Play size={15} /> Lancer les tests {codeAttempts > 0 && `· essai ${codeAttempts + 1}`}
+                    <Play size={15} /> {q.type === "refactor" ? "Vérifier que rien n'est cassé" : "Lancer les tests"} {codeAttempts > 0 && `· essai ${codeAttempts + 1}`}
                   </button>
                 )}
                 {testResults.length > 0 && (
@@ -4708,7 +4739,7 @@ export default function FullstackQuest() {
     if (view !== "battle" || activeIdx == null) return;
     const q = getBattleQuestions(MODULES[activeIdx] || { questions: [] })[qIdx];
     if (!q) return;
-    if (q.type === "code") { setCodeInput(q.starter || ""); setTestResults([]); setCodeAttempts(0); setReview(null); }
+    if (q.type === "code" || q.type === "refactor") { setCodeInput(q.starter || ""); setTestResults([]); setCodeAttempts(0); setReview(null); }
     else if (q.type === "order") { setOrderWork(shuffleIndices(q.lines.length)); }
   }, [view, activeIdx, qIdx]);
 
@@ -5000,7 +5031,7 @@ export default function FullstackQuest() {
   // Examen de Qualification : condition d'accès aux secteurs avancés + au Chantier.
   function startQualificationExam() {
     const foundationModules = MODULES.filter((m) => FOUNDATION_TIER.includes(m.id));
-    const pool = collectAllQuestions(foundationModules).filter((q) => q.type !== "code" && q.type !== "order");
+    const pool = collectAllQuestions(foundationModules).filter(isQcm);
     const seed = Math.floor(Math.random() * 2 ** 31);
     const run = sampleWithRng(pool, Math.min(QUALIFICATION_SIZE, pool.length), seed);
     setQualRun(run);
@@ -5098,7 +5129,9 @@ export default function FullstackQuest() {
     if (i === q.correct) landHit(); else hurt();
   }
 
-  // Défi CODE : exécute les tests ; tout au vert = coup porté (itération libre, pas de perte de cœur)
+  // Défi CODE / REFACTOR : exécute les tests ; tout au vert = coup porté
+  // (itération libre, pas de perte de cœur). En refactor le starter passe déjà :
+  // pas de bonus « sans faute » (trivial), la récompense est la revue propre.
   async function runTests() {
     if (answered) return;
     const q = getBattleQuestions(MODULES[activeIdx])[qIdx];
@@ -5107,13 +5140,13 @@ export default function FullstackQuest() {
     const allPass = res.length > 0 && res.every((r) => r.pass);
     if (allPass) {
       const firstTry = codeAttempts === 0;
-      setSelected("code");
+      setSelected(q.type);
       setAnswered(true);
       landHit();
-      if (firstTry) { setRunXP((x) => x + 20); addFloater("dmg", "SANS FAUTE +20"); }
+      if (firstTry && q.type === "code") { setRunXP((x) => x + 20); addFloater("dmg", "SANS FAUTE +20"); }
     } else {
       setCodeAttempts((a) => a + 1);
-      setAda("Presque — un test reste rouge. Ajuste ton code et relance.", "worried");
+      setAda(q.type === "refactor" ? "Un test a cassé — ton refactor a changé le comportement. Reviens en arrière et retente." : "Presque — un test reste rouge. Ajuste ton code et relance.", "worried");
       SFX.hit();
     }
   }
@@ -5301,7 +5334,7 @@ export default function FullstackQuest() {
   // Le bonus XP n'existe qu'en duel (mécanique runXP + floaters) ; en Épreuve
   // Technique le verdict est la récompense.
   async function askCodeReview(q, code) {
-    if (!q || q.type !== "code") return;
+    if (!q || (q.type !== "code" && q.type !== "refactor")) return;
     setReview((r) => ({ ...(r || {}), busy: true, error: "" }));
     const result = await callAiReview(q, code, aiSettings, authToken);
     if (!result.ok) {
