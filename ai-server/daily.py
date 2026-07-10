@@ -11,8 +11,9 @@ Le classement se lit sans compte (les recruteurs/PIP doivent pouvoir le
 consulter) : on n'y expose que le nom d'affichage, jamais l'email.
 """
 
+import json
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
@@ -23,7 +24,7 @@ import core
 router = APIRouter()
 
 # Borne de sécurité : un défi ne peut pas contenir plus de questions qu'il n'y
-# a de modules, et le score ne peut pas dépasser le total soumis.
+# a de modules (marge large).
 MAX_DAILY_QUESTIONS = 50
 
 
@@ -32,10 +33,14 @@ def _utc_today_ref() -> str:
     return f"{now.year:04d}-{now.month:02d}-{now.day:02d}"
 
 
+class DailyAnswer(BaseModel):
+    hash: str                 # content_hash de la question (moduleId|qcm|prompt)
+    selected: Optional[int] = None
+
+
 class DailySubmitIn(BaseModel):
     reference: str            # "YYYY-MM-DD" (UTC) — doit être le jour courant
-    score: int
-    total: int
+    answers: List[DailyAnswer] = []
     durationMs: int = 0
 
 
@@ -46,13 +51,48 @@ async def submit_daily(body: DailySubmitIn, user: Dict[str, Any] = Depends(accou
     # pas le jour UTC courant (anti-antidatage / rejeu d'un ancien défi).
     if body.reference != _utc_today_ref():
         raise HTTPException(status_code=409, detail="Ce défi n'est plus celui d'aujourd'hui — recharge l'application.")
-    total = int(body.total)
-    score = int(body.score)
-    if total < 0 or total > MAX_DAILY_QUESTIONS or score < 0 or score > total:
-        raise HTTPException(status_code=400, detail="Résultat de défi invalide.")
-    duration = max(0, int(body.durationMs))
+    if len(body.answers) > MAX_DAILY_QUESTIONS:
+        raise HTTPException(status_code=400, detail="Défi invalide (trop de réponses).")
+
+    # Le serveur fait autorité sur le SCORE : le client n'envoie que ses réponses
+    # (hash de question + option choisie), jamais un score. On corrige chaque
+    # réponse contre la bonne réponse stockée en banque. Une question absente de
+    # la banque n'est pas notée (exclue du total, ni juste ni fausse) — le
+    # classement ne dépend donc que de questions vérifiables côté serveur.
+    hashes = list({a.hash for a in body.answers if a.hash})  # dédoublonnés
     pool = await core.get_pool()
     async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT content_hash, module_id, payload FROM questions "
+            "WHERE content_hash = ANY($1) AND status='active' AND qtype='qcm'",
+            hashes,
+        ) if hashes else []
+        by_hash = {}
+        for r in rows:
+            payload = r["payload"]
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            by_hash[r["content_hash"]] = {"module_id": r["module_id"], "correct": payload.get("correct")}
+
+        score = 0
+        total = 0
+        seen_hashes = set()
+        seen_modules = set()
+        for a in body.answers:
+            q = by_hash.get(a.hash)
+            if q is None or a.hash in seen_hashes:
+                continue  # inconnue en banque, ou doublon : non notée
+            # Anti-cherry-pick : une seule question comptée par module (le défi
+            # légitime en tire une par secteur).
+            if q["module_id"] in seen_modules:
+                continue
+            seen_hashes.add(a.hash)
+            seen_modules.add(q["module_id"])
+            total += 1
+            if a.selected is not None and a.selected == q["correct"]:
+                score += 1
+
+        duration = max(0, int(body.durationMs))
         # Une seule tentative comptée par jour : la première gagne (c'est un
         # examen, pas un entraînement rejouable pour améliorer son rang).
         row = await conn.fetchrow(
@@ -63,7 +103,7 @@ async def submit_daily(body: DailySubmitIn, user: Dict[str, Any] = Depends(accou
             user["id"], score, total, duration,
         )
     # Idempotent : si le jour était déjà enregistré, on renvoie ok sans écraser.
-    return {"ok": True, "dailyDoneToday": True, "recorded": row is not None}
+    return {"ok": True, "dailyDoneToday": True, "recorded": row is not None, "score": score, "total": total}
 
 
 @router.get("/api/v1/daily/status")

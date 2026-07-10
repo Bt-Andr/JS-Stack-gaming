@@ -1546,6 +1546,18 @@ function isQcm(q) {
 // Un compte à rebours par question ; à zéro, la question est comptée ratée.
 const DAILY_SECONDS_PER_Q = 45;
 
+// Empreinte de contenu d'une question — MIROIR EXACT de `_content_hash` côté
+// serveur (ai-server/main.py) : sha256("moduleId|qtype|prompt-normalisé"), où
+// la normalisation est minuscule + espaces compactés. Sert à faire noter le
+// Défi côté serveur : le client envoie ses réponses (hash + option choisie),
+// le serveur retrouve la question en banque et corrige lui-même le score.
+async function contentHash(moduleId, qtype, prompt) {
+  const normalized = String(prompt).toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+  const data = new TextEncoder().encode(`${moduleId}|${qtype}|${normalized}`);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function generateDailyRun(seed, modules) {
   const r = rng(seed);
   const picked = [];
@@ -2251,6 +2263,9 @@ function DailyView({ ctx }) {
   const [selected, setSelected] = useState(null);
   const [answered, setAnswered] = useState(false);
   const [timeLeft, setTimeLeft] = useState(DAILY_SECONDS_PER_Q);
+  // Réponses réellement jouées (hors cartes d'abonnement), envoyées au serveur
+  // pour notation. On ne stocke que le choix : le serveur détient les corrigés.
+  const [answers, setAnswers] = useState([]);
 
   // Seules les questions jouables (secteurs accessibles) comptent : une question
   // d'un secteur réservé au pass est remplacée par une invitation à l'abonnement
@@ -2276,6 +2291,14 @@ function DailyView({ ctx }) {
   }, [timeLeft, answered, isLocked, done]);
 
   function advance() {
+    const cur = dailyRun[dailyQIdx];
+    // On accumule la réponse jouée (les cartes d'abonnement verrouillées ne
+    // comptent pas). `selected` vaut null si le temps a été écoulé = raté.
+    let nextAnswers = answers;
+    if (cur && !cur.locked) {
+      nextAnswers = [...answers, { moduleId: cur.moduleId, prompt: cur.prompt, selected }];
+      setAnswers(nextAnswers);
+    }
     const isLast = dailyQIdx + 1 >= dailyRun.length;
     if (isLast) {
       const ref = getDailyReference();
@@ -2283,7 +2306,7 @@ function DailyView({ ctx }) {
         ...profile,
         dailyRuns: { ...(profile.dailyRuns || {}), [ref]: { score: dailyScore, total: scorableTotal, completedISO: new Date().toISOString() } },
       });
-      submitDailyResult?.(ref, dailyScore, scorableTotal);
+      submitDailyResult?.(ref, nextAnswers);
     }
     setDailyQIdx((i) => i + 1);
     setSelected(null);
@@ -2909,8 +2932,10 @@ function AdminView({ ctx }) {
     setNotice("");
     const report = { added: 0, skipped: 0, unrepresentable: 0, failed: 0, errors: [] };
     try {
-      const advanced = MODULES.filter((m) => ADVANCED_TIER.includes(m.id));
-      for (const mod of advanced) {
+      // TOUS les secteurs, fondation comprise : le serveur doit connaître chaque
+      // question du Défi pour pouvoir le noter lui-même (intégrité du classement).
+      // Idempotent (409 = déjà présent), donc relancer ne duplique rien.
+      for (const mod of MODULES) {
         for (const q of mod.staticQuestions) {
           // Un test dont l'attendu est undefined ne survit pas à JSON (la clé
           // disparaît) : la banque ne peut pas le représenter fidèlement. On
@@ -3088,14 +3113,15 @@ function AdminView({ ctx }) {
 
         {tab === "list" ? (
           <>
-            {/* Import en masse : verse les secteurs avancés du bundle dans la banque.
-                Prérequis pour pouvoir un jour les retirer du bundle (Phase B). */}
+            {/* Import en masse : verse TOUS les secteurs du bundle dans la banque.
+                Requis pour que le serveur note le Défi (intégrité du classement)
+                et prérequis pour un jour retirer les questions du bundle. */}
             <div className="mb-3 p-3 rounded-lg" style={{ backgroundColor: PANEL, border: `1px solid ${LINE}` }}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-mono text-[11px] tracking-widest" style={{ color: "#8ECAE6" }}>📥 IMPORTER LES SECTEURS AVANCÉS</p>
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: "#8ECAE6" }}>📥 IMPORTER TOUS LES SECTEURS</p>
                   <p className="text-[11px] leading-relaxed mt-0.5" style={{ color: TEXT_MUTED }}>
-                    Copie les questions statiques des 6 secteurs payants ({ADVANCED_TIER.join(", ")}) dans la banque. Sans risque : relançable, les doublons sont ignorés.
+                    Copie les questions statiques des 9 secteurs (fondation + avancés) dans la banque. Requis pour que le serveur note le Défi Quotidien. Sans risque : relançable, les doublons sont ignorés.
                   </p>
                 </div>
                 <button onClick={seedAdvancedBank} disabled={seedBusy} className="px-3 py-1.5 rounded-lg font-mono text-xs shrink-0 disabled:opacity-50" style={{ backgroundColor: "#8ECAE6", color: BG }}>
@@ -4334,7 +4360,7 @@ function ParcoursView({ ctx }) {
 
 /* --- Classement plateforme : les meilleurs au Défi Quotidien --------- */
 function LeaderboardView({ ctx }) {
-  const { setView, authToken, authUser } = ctx;
+  const { setView, authToken, authUser, openModal } = ctx;
   const [state, setState] = useState({ busy: true, error: "", entries: [], me: null });
 
   useEffect(() => {
@@ -4410,7 +4436,16 @@ function LeaderboardView({ ctx }) {
         )}
 
         {!authToken && !state.busy && (
-          <p className="font-mono text-[11px] text-center mt-5" style={{ color: TEXT_MUTED }}>Crée un compte pour apparaître au classement.</p>
+          <div className="mt-6 text-center">
+            <p className="font-mono text-[11px] mb-2" style={{ color: TEXT_MUTED }}>Crée un compte pour apparaître au classement.</p>
+            <button
+              onClick={() => openModal("account")}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg font-mono text-xs"
+              style={{ backgroundColor: AMBER, color: BG }}
+            >
+              <User size={14} /> Se connecter / S'inscrire
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -5785,9 +5820,17 @@ export default function FullstackQuest() {
     }
   }
 
-  async function submitDailyResult(ref, score, total) {
+  // answers: [{ moduleId, prompt, selected }] pour les questions RÉELLEMENT
+  // jouées (hors cartes d'abonnement). On n'envoie jamais de score : le serveur
+  // corrige lui-même (voir contentHash / POST /daily/submit). Intégrité du
+  // classement : un client ne peut pas s'auto-attribuer un score.
+  async function submitDailyResult(ref, answers) {
     if (!authToken) return; // invité : joué localement, hors classement
-    const payload = { reference: ref, score, total, durationMs: dailyStartMs ? Date.now() - dailyStartMs : 0 };
+    const graded = await Promise.all((answers || []).map(async (a) => ({
+      hash: await contentHash(a.moduleId, "qcm", a.prompt),
+      selected: a.selected,
+    })));
+    const payload = { reference: ref, answers: graded, durationMs: dailyStartMs ? Date.now() - dailyStartMs : 0 };
     const ok = await postDaily(payload);
     try {
       if (ok) window.localStorage.removeItem(PENDING_DAILY_KEY);
