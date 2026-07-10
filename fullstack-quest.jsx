@@ -1041,7 +1041,7 @@ const MODULES = [
 const CHANTIER = {
   id: "todo-fullstack-v1",
   title: "Chantier — Gestionnaire de tâches Fullstack",
-  pitch: "Un vrai petit projet à construire toi-même, dans ton éditeur : une API Express qui stocke des tâches, et un front React qui les affiche et les modifie. FSQ ne peut pas lire ton dépôt — chaque jalon coché est une déclaration sur l'honneur, à toi de vérifier les critères avant de cocher.",
+  pitch: "Un vrai petit projet à construire toi-même, dans ton éditeur : une API Express qui stocke des tâches, et un front React qui les affiche et les modifie. FSQ ne peut pas lire ton dépôt — chaque jalon coché reste une déclaration sur l'honneur, mais tu peux coller ton code à ADA pour une vraie revue avant de cocher.",
   milestones: [
     {
       id: "setup",
@@ -1523,6 +1523,126 @@ async function callAi(prompt, aiSettings, authToken) {
   }
 }
 
+/* Revue de code — après que les tests passent, ADA relit la solution et rend
+   un verdict qualité ("propre" | "a_polir") + un commentaire. Le serveur FSQ
+   assemble le prompt et parse le verdict lui-même ; pour les moteurs de dev
+   locaux (Ollama / OpenAI-compatible) on reproduit le même contrat ici. */
+function parseReviewText(text) {
+  const lines = String(text).trim().split("\n");
+  const m = lines[0]?.match(/^\s*VERDICT\s*:\s*(PROPRE|[AÀ][_ ]?POLIR)\b/i);
+  if (m) {
+    const verdict = m[1].toUpperCase() === "PROPRE" ? "propre" : "a_polir";
+    return { verdict, comment: lines.slice(1).join("\n").trim() };
+  }
+  return { verdict: null, comment: String(text).trim() };
+}
+
+async function callAiReview(q, code, aiSettings, authToken, mode = "exercise") {
+  // "exercise" : q.tests = [{call, expect}] exécutés et verts ;
+  // "chantier" : q.tests = critères d'acceptation (texte), rien n'est exécuté.
+  const testLabels = (q.tests || []).map((t) => (t && typeof t === "object" ? t.call : String(t)));
+  if (aiSettings.provider === "fsq-server") {
+    const endpoint = String(aiSettings.endpoint || "").replace(/\/$/, "");
+    try {
+      const res = await fetch(`${endpoint}/api/v1/review`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          ...(aiSettings.apiKey ? { "X-API-Key": aiSettings.apiKey } : {}),
+        },
+        body: JSON.stringify({
+          prompt: q.prompt,
+          starter: q.starter || null,
+          code,
+          tests: testLabels,
+          mode,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        return { ok: false, error: body?.detail || `HTTP ${res.status}` };
+      }
+      const data = await res.json();
+      return { ok: true, verdict: data?.verdict || null, comment: String(data?.comment || "").trim() };
+    } catch (e) {
+      return { ok: false, error: `Revue indisponible: ${String(e?.message || e)}. Réessaie dans un instant.` };
+    }
+  }
+  // Moteur local (dev) : on embarque les consignes de revue dans le prompt et on parse ici.
+  const prompt = [
+    mode === "chantier"
+      ? "L'apprenant construit un vrai projet hors de l'app et colle le code d'un jalon. Tu ne peux pas l'exécuter : juge sur lecture si les critères d'acceptation semblent remplis ET si le code est propre (nommage, lisibilité, gestion d'erreurs)."
+      : "Le code ci-dessous passe déjà tous ses tests : juge uniquement sa QUALITÉ (nommage, lisibilité, simplicité, idiomes JS modernes).",
+    "Réponds en français. Ligne 1 exactement « VERDICT: PROPRE » ou « VERDICT: A_POLIR », puis 2 à 4 phrases : ce qui est bien, et si A_POLIR, LE point le plus important à corriger, concret.",
+    `Énoncé: ${q.prompt}`,
+    q.starter ? `Code de départ: ${q.starter}` : "",
+    testLabels.length ? `${mode === "chantier" ? "Critères d'acceptation" : "Tests (verts)"}: ${testLabels.join(" | ")}` : "",
+    `Code soumis:\n${code}`,
+  ].filter(Boolean).join("\n");
+  const r = await callAi(prompt, aiSettings, authToken);
+  if (!r.ok) return r;
+  const { verdict, comment } = parseReviewText(r.text);
+  return { ok: true, verdict, comment: comment || r.text };
+}
+
+function ReviewVerdictBadge({ verdict }) {
+  const badge = verdict === "propre"
+    ? { label: "✓ PROPRE", color: SUCCESS }
+    : verdict === "a_polir"
+    ? { label: "À POLIR", color: AMBER }
+    : null;
+  if (!badge) return null;
+  return (
+    <span className="px-2 py-0.5 rounded font-mono text-[11px] font-bold" style={{ backgroundColor: `${badge.color}22`, color: badge.color, border: `1px solid ${badge.color}` }}>
+      {badge.label}
+    </span>
+  );
+}
+
+/* Panneau de revue de code ADA — partagé entre les duels (BattleView) et les
+   Épreuves Techniques. S'affiche une fois les tests verts. */
+function CodeReviewPanel({ review, locked, onAsk, onUnlock, onResubmit }) {
+  const accent = review?.verdict === "propre" ? SUCCESS : review?.verdict === "a_polir" ? AMBER : "#8ECAE6";
+  return (
+    <div className="mt-3 p-3 rounded-md fsq-rise" style={{ backgroundColor: PANEL_SOFT, borderLeft: `3px solid ${accent}` }}>
+      <div className="flex items-center justify-between gap-3 mb-1.5">
+        <p className="font-mono text-[11px] tracking-widest" style={{ color: TEXT_MUTED }}>🔍 REVUE DE CODE — ADA</p>
+        {review?.verdict ? (
+          <ReviewVerdictBadge verdict={review.verdict} />
+        ) : locked ? (
+          <button onClick={onUnlock} className="px-2 py-1 rounded-md font-mono text-[11px] flex items-center gap-1" style={{ backgroundColor: AMBER, color: BG }}>
+            <Unlock size={11} /> Débloquer
+          </button>
+        ) : (
+          <button onClick={onAsk} disabled={review?.busy} className="px-2 py-1 rounded-md font-mono text-[11px] disabled:opacity-50" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
+            {review?.busy ? "ADA relit…" : "Faire relire mon code"}
+          </button>
+        )}
+      </div>
+      {!review?.comment && !review?.error && (
+        <p className="text-xs leading-relaxed" style={{ color: TEXT_MUTED }}>
+          {locked
+            ? "Tes tests passent — mais un pro relirait-il ton code sans tiquer ? ADA relit comme en vraie revue de code : nommage, lisibilité, idiomes. Inclus dans l'accès complet."
+            : "Tes tests passent — reste à savoir si le code est propre. ADA le relit comme un senior en revue : verdict + l'amélioration qui compte. (Coûte un indice du quota.)"}
+        </p>
+      )}
+      {review?.error && <p className="text-xs" style={{ color: DANGER }}>{review.error}</p>}
+      {review?.comment && (
+        <MarkdownLite text={review.comment} className="text-xs leading-relaxed pr-1" style={{ color: TEXT, maxHeight: 180, overflowY: "auto" }} />
+      )}
+      {review?.verdict === "a_polir" && onResubmit && (
+        <div className="mt-2">
+          <button onClick={onResubmit} disabled={review?.busy} className="px-2 py-1 rounded-md font-mono text-[11px] disabled:opacity-50" style={{ backgroundColor: AMBER, color: BG }}>
+            {review?.busy ? "ADA relit…" : "↺ Corriger et resoumettre"}
+          </button>
+          <span className="ml-2 text-[11px]" style={{ color: TEXT_MUTED }}>Modifie ton code ci-dessus, les tests seront re-vérifiés avant la relecture.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ====================================================================== */
 /*  VUES — chaque écran est un composant pur piloté par `ctx`             */
 /* ====================================================================== */
@@ -1641,7 +1761,8 @@ function QualificationView({ ctx }) {
 
 /* --- Épreuve Technique (par secteur) ---------------------------------- */
 function TechnicalView({ ctx }) {
-  const { profile, activeIdx, setView, techCodeInput, setTechCodeInput, techResults, runTechnicalTests } = ctx;
+  const { profile, activeIdx, setView, techCodeInput, setTechCodeInput, techResults, runTechnicalTests,
+    review, askCodeReview, resubmitForReview, aiSettings, hasPass, authToken, openModal } = ctx;
   const mod = MODULES[activeIdx];
   const q = mod ? getTechnicalQuestions(mod)[0] : null;
   const [running, setRunning] = useState(false);
@@ -1714,6 +1835,18 @@ function TechnicalView({ ctx }) {
               </p>
             )}
             {q.explain && allPass && <p className="text-xs mt-2 leading-relaxed" style={{ color: TEXT_MUTED }}>{q.explain}</p>}
+
+            {/* Visible dès que les tests passent, et maintenu si une resoumission
+                fait repasser un test au rouge (le garde-fou s'affiche dedans). */}
+            {(allPass || review?.verdict) && (
+              <CodeReviewPanel
+                review={review}
+                locked={aiSettings.provider === "fsq-server" && !hasPass}
+                onAsk={() => askCodeReview(q, techCodeInput)}
+                onUnlock={() => openModal(authToken ? "pay" : "account")}
+                onResubmit={() => resubmitForReview(q, techCodeInput)}
+              />
+            )}
           </div>
         </Frame>
       </div>
@@ -1943,8 +2076,32 @@ function ChantierView({ ctx }) {
   const { profile, setView, aiSettings, authToken, toggleMilestone } = ctx;
   const [openId, setOpenId] = useState(null);
   const [hints, setHints] = useState({}); // { [milestoneId]: { busy, text, error } }
+  // Revue par jalon : le joueur colle le code de SON projet, ADA juge sur
+  // lecture (critères + propreté). Non persisté : la revue éclaire le joueur
+  // avant qu'il coche, elle ne coche pas à sa place.
+  const [reviews, setReviews] = useState({}); // { [milestoneId]: { code, busy, verdict, comment, error } }
 
   const doneCount = CHANTIER.milestones.filter((m) => profile.chantier?.milestones?.[m.id]?.done).length;
+
+  async function requestReview(m) {
+    const cur = reviews[m.id] || {};
+    const code = (cur.code || "").trim();
+    if (!code) {
+      setReviews((r) => ({ ...r, [m.id]: { ...cur, error: "Colle d'abord le code du jalon dans la zone ci-dessus." } }));
+      return;
+    }
+    setReviews((r) => ({ ...r, [m.id]: { ...cur, busy: true, error: "" } }));
+    const result = await callAiReview(
+      { prompt: `${m.title} — ${m.spec}`, tests: m.acceptance },
+      code, aiSettings, authToken, "chantier"
+    );
+    setReviews((r) => ({
+      ...r,
+      [m.id]: result.ok
+        ? { ...r[m.id], busy: false, verdict: result.verdict, comment: result.comment, error: "" }
+        : { ...r[m.id], busy: false, error: result.error },
+    }));
+  }
 
   async function requestHint(m) {
     setHints((h) => ({ ...h, [m.id]: { busy: true, text: "", error: "" } }));
@@ -2039,6 +2196,50 @@ function ChantierView({ ctx }) {
                       {!hint?.text && !hint?.error && (
                         <p className="text-xs italic" style={{ color: TEXT_MUTED }}>Indice de secours : {m.hint}</p>
                       )}
+
+                      {/* Revue de code du jalon : coller le fichier concerné, ADA relit */}
+                      {(() => {
+                        const rev = reviews[m.id];
+                        return (
+                          <div className="mt-3 pt-3 border-t" style={{ borderColor: LINE }}>
+                            <div className="flex items-center justify-between gap-3 mb-1.5">
+                              <p className="font-mono text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>🔍 REVUE DE CODE — ADA</p>
+                              {rev?.verdict && <ReviewVerdictBadge verdict={rev.verdict} />}
+                            </div>
+                            {!rev?.comment && (
+                              <p className="text-xs leading-relaxed mb-2" style={{ color: TEXT_MUTED }}>
+                                Colle le fichier principal du jalon : ADA vérifie les critères et la propreté, comme un senior en revue.
+                                Le verdict ne coche pas la case à ta place — mais tu sauras si tu peux la cocher fièrement. (Coûte un indice du quota.)
+                              </p>
+                            )}
+                            <textarea
+                              value={rev?.code || ""}
+                              onChange={(e) => setReviews((r) => ({ ...r, [m.id]: { ...(r[m.id] || {}), code: e.target.value } }))}
+                              spellCheck={false}
+                              rows={5}
+                              placeholder="Colle ici le code du jalon (le fichier concerné suffit)"
+                              className="w-full font-mono text-xs p-2.5 rounded-md resize-y focus:outline-none"
+                              style={{ backgroundColor: "#081B33", border: `1px solid ${LINE}`, color: "#C9E2F5", lineHeight: 1.5 }}
+                            />
+                            <button
+                              onClick={() => requestReview(m)}
+                              disabled={rev?.busy}
+                              className="mt-2 px-3 py-1.5 rounded-lg font-mono text-xs disabled:opacity-50"
+                              style={{ backgroundColor: PANEL_SOFT, color: TEXT, border: `1px solid ${LINE}` }}
+                            >
+                              {rev?.busy ? "ADA relit…" : rev?.verdict ? "↺ Resoumettre à ADA" : "Envoyer à ADA"}
+                            </button>
+                            {rev?.error && <p className="text-xs mt-2" style={{ color: DANGER }}>{rev.error}</p>}
+                            {rev?.comment && (
+                              <MarkdownLite
+                                text={rev.comment}
+                                className="text-xs leading-relaxed p-2 rounded mt-2"
+                                style={{ backgroundColor: PANEL_SOFT, color: TEXT, maxHeight: 220, overflowY: "auto" }}
+                              />
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -2048,7 +2249,7 @@ function ChantierView({ ctx }) {
         </div>
 
         <p className="mt-6 text-[11px] font-mono text-center" style={{ color: TEXT_MUTED }}>
-          FSQ ne peut pas lire ton dépôt : chaque case cochée est une déclaration sur l'honneur.
+          FSQ ne peut pas lire ton dépôt : chaque case cochée reste une déclaration sur l'honneur — la revue d'ADA t'aide à cocher en connaissance de cause.
         </p>
       </div>
     </div>
@@ -3683,6 +3884,7 @@ function BattleView({ ctx }) {
     codeInput, setCodeInput, runTests, codeAttempts, testResults,
     orderWork, moveLine, validateOrder, selectAnswer, dead, nextQuestion,
     askLocalHint, aiHint, aiBusy, aiError, clearAiHint,
+    review, askCodeReview, resubmitForReview,
     aiSettings, authToken, access, hasPass, openModal,
   } = ctx;
   const mod = MODULES[activeIdx];
@@ -3848,7 +4050,7 @@ function BattleView({ ctx }) {
                 <textarea
                   value={codeInput}
                   onChange={(e) => setCodeInput(e.target.value)}
-                  disabled={answered}
+                  disabled={answered && review?.verdict !== "a_polir"}
                   spellCheck={false}
                   rows={Math.max(5, (q.starter || "").split("\n").length + 1)}
                   className="w-full font-mono text-xs sm:text-sm p-3 rounded-md resize-y focus:outline-none"
@@ -3875,6 +4077,17 @@ function BattleView({ ctx }) {
                       </div>
                     ))}
                   </div>
+                )}
+
+                {/* Revue de code ADA — les tests sont verts, mais le code est-il propre ? */}
+                {answered && success && (
+                  <CodeReviewPanel
+                    review={review}
+                    locked={aiSettings.provider === "fsq-server" && !hasPass}
+                    onAsk={() => askCodeReview(q, codeInput)}
+                    onUnlock={() => openModal(authToken ? "pay" : "account")}
+                    onResubmit={() => resubmitForReview(q, codeInput)}
+                  />
                 )}
               </div>
             )}
@@ -4094,6 +4307,8 @@ export default function FullstackQuest() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiHint, setAiHint] = useState("");
   const [aiError, setAiError] = useState("");
+  // Revue de code post-tests-verts : null tant que rien n'est demandé.
+  const [review, setReview] = useState(null); // { busy, verdict, comment, error, rewarded }
 
   // Compte joueur : JWT + dernier /auth/me connu (accès conservé hors-ligne).
   const [authToken, setAuthToken] = useState(() => {
@@ -4303,7 +4518,7 @@ export default function FullstackQuest() {
     if (view !== "battle" || activeIdx == null) return;
     const q = getBattleQuestions(MODULES[activeIdx] || { questions: [] })[qIdx];
     if (!q) return;
-    if (q.type === "code") { setCodeInput(q.starter || ""); setTestResults([]); setCodeAttempts(0); }
+    if (q.type === "code") { setCodeInput(q.starter || ""); setTestResults([]); setCodeAttempts(0); setReview(null); }
     else if (q.type === "order") { setOrderWork(shuffleIndices(q.lines.length)); }
   }, [view, activeIdx, qIdx]);
 
@@ -4628,6 +4843,7 @@ export default function FullstackQuest() {
     const q = getTechnicalQuestions(mod)[0];
     setTechCodeInput(q?.starter || "");
     setTechResults([]);
+    setReview(null);
     setView("technical");
   }
 
@@ -4704,7 +4920,7 @@ export default function FullstackQuest() {
       setSelected("code");
       setAnswered(true);
       landHit();
-      if (firstTry) { setRunXP((x) => x + 20); addFloater("dmg", "PROPRE +20"); }
+      if (firstTry) { setRunXP((x) => x + 20); addFloater("dmg", "SANS FAUTE +20"); }
     } else {
       setCodeAttempts((a) => a + 1);
       setAda("Presque — un test reste rouge. Ajuste ton code et relance.", "worried");
@@ -4890,6 +5106,50 @@ export default function FullstackQuest() {
     return parts.join("\n");
   }
 
+  // Revue de code : disponible une fois les tests verts, une revue par question.
+  // Consomme le même quota journalier que les indices (une revue = un indice).
+  // Le bonus XP n'existe qu'en duel (mécanique runXP + floaters) ; en Épreuve
+  // Technique le verdict est la récompense.
+  async function askCodeReview(q, code) {
+    if (!q || q.type !== "code") return;
+    setReview((r) => ({ ...(r || {}), busy: true, error: "" }));
+    const result = await callAiReview(q, code, aiSettings, authToken);
+    if (!result.ok) {
+      setReview((r) => ({ ...(r || {}), busy: false, error: result.error }));
+      return;
+    }
+    const firstCleanVerdict = result.verdict === "propre" && !review?.rewarded;
+    if (firstCleanVerdict && view === "battle") {
+      setRunXP((x) => x + 25);
+      addFloater("dmg", "CODE PROPRE +25");
+    }
+    setReview({
+      busy: false,
+      verdict: result.verdict,
+      comment: result.comment,
+      error: "",
+      rewarded: review?.rewarded || result.verdict === "propre",
+    });
+    // Reflète le quota consommé sans attendre le prochain /auth/me.
+    if (aiSettings.provider === "fsq-server" && authToken) {
+      setAuthUser((u) => (u?.access ? { ...u, access: { ...u.access, aiUsedToday: (u.access.aiUsedToday || 0) + 1 } } : u));
+    }
+  }
+
+  // Boucle « corrige et resoumets » : re-vérifie les tests avant de redemander
+  // une revue — ADA ne relit que du code vert. Le résultat des tests est
+  // réaffiché dans la vue d'origine (duel ou épreuve technique).
+  async function resubmitForReview(q, code) {
+    const res = await runCode(code, q.tests);
+    if (view === "battle") setTestResults(res); else setTechResults(res);
+    const allPass = res.length > 0 && res.every((r) => r.pass);
+    if (!allPass) {
+      setReview((r) => ({ ...(r || {}), busy: false, error: "Un test est repassé au rouge — corrige d'abord, ADA ne relit que du code vert." }));
+      return;
+    }
+    await askCodeReview(q, code);
+  }
+
   async function askLocalHint() {
     if (activeIdx == null) return;
     const mod = MODULES[activeIdx];
@@ -4939,6 +5199,7 @@ export default function FullstackQuest() {
     importText, setImportText, exportProgress, importProgress,
     aiSettings, setAiSettings, aiReady, aiStatus,
     aiHint, aiBusy, aiError, askLocalHint, clearAiHint,
+    review, askCodeReview, resubmitForReview,
     levelInfo, completedCount, badgeCount, nextIdx, adaGreet,
     isUnlocked, startModule, engage, backToMap, resetProgress,
     selectAnswer, runTests, moveLine, validateOrder, nextQuestion,

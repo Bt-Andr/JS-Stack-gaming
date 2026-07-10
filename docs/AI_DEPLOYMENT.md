@@ -83,6 +83,29 @@ against the deployed Render server, `AI_ALLOWED_ORIGINS` on Render must include
 `VITE_AI_SERVER_URL=https://<render-url>` so the harness targets Render instead
 of `localhost:8000`.
 
+Revue de code IA (`/api/v1/review`)
+------------------------------------
+En plus du coach (`/api/v1/generate`), le serveur expose `POST /api/v1/review` :
+quand les tests d'un exercice de code passent, le front envoie l'énoncé, le
+starter, les appels de test et la solution du joueur ; le modèle relit le code
+comme en revue professionnelle (nommage, lisibilité, idiomes) et renvoie
+`{verdict: "propre"|"a_polir"|null, comment}`. Le prompt système et le parsing
+du verdict vivent côté serveur (`REVIEW_SYSTEM_PROMPT` dans `main.py`).
+
+Deux modes via le champ `mode` du body : `"exercise"` (défaut — le code a des
+tests exécutés et verts, la revue ne juge que la qualité) et `"chantier"` (le
+joueur colle le code d'un jalon de son vrai projet ; rien n'est exécuté, la
+revue juge sur lecture la conformité aux critères d'acceptation ET la qualité).
+Chaque mode a son prompt système dans `main.py`.
+
+Mêmes règles d'accès que `/generate` : compte + pass actif + quota journalier
+(une revue consomme un indice du quota `aiDailyHints`), ou la clé partagée
+`X-API-Key` pour l'admin et les tests. Le code est plafonné à 4 000 caractères
+et la sortie à 350 tokens. Aucune variable d'environnement supplémentaire.
+
+Vérification rapide : `curl -X POST https://<render-url>/api/v1/review -H "Content-Type: application/json" -d '{"prompt":"...","code":"function f(){}"}'`
+(en provider `stub`, la réponse est une revue simulée avec `verdict: "a_polir"`).
+
 Vercel configuration
 ---------------------
 After your AI service is deployed on Render (or another provider), configure the frontend deployed on Vercel to call it:
