@@ -1406,6 +1406,14 @@ const AUTH_TOKEN_KEY = "fullstack-quest-auth-token";
 // Dernier /auth/me connu : permet de garder l'accès (pass, quota) hors-ligne.
 const AUTH_CACHE_KEY = "fullstack-quest-auth-cache";
 
+// Vérifications automatiques du paiement, espacées : 10s, puis 20s, puis 30s.
+// Ensuite on laisse la main à la vérification manuelle (bouton dans la modale).
+const PAY_POLL_WINDOWS_MS = [10000, 20000, 30000];
+// Statuts finaux : plus rien à attendre (l'un débloque, les autres arrêtent).
+const PAY_FINAL_STATUSES = ["PAID", "FAILED", "EXPIRED"];
+// Statuts d'attente : la fenêtre d'attente reste affichée tant qu'on y est.
+const PAY_WAITING_STATUSES = ["PENDING", "PROCESSING", "TIMEOUT"];
+
 function bankApiBase() {
   return (ENV_AI_SERVER_URL || "http://localhost:8000").replace(/\/$/, "");
 }
@@ -1427,6 +1435,16 @@ async function apiJson(path, { token, method = "GET", body } = {}) {
     throw err;
   }
   return data;
+}
+
+// Erreurs affichées au joueur : on ne montre jamais un message technique brut
+// (code HTTP, exception réseau, nom de service). Si le serveur a renvoyé un
+// détail rédigé pour l'utilisateur (français, sans jargon), on le garde ;
+// sinon on retombe sur un message générique clair.
+function friendlyError(e, fallback) {
+  const msg = String(e?.message || e || "").trim();
+  const technical = !msg || /\b(HTTP|http)\b|\b\d{3}\b|fetch|network|Failed to|TypeError|undefined|null|Error:|ECONN|timeout|CORS/i.test(msg);
+  return technical ? fallback : msg;
 }
 
 async function adminFetch(path, adminKey, opts = {}) {
@@ -1552,7 +1570,7 @@ async function callAi(prompt, aiSettings, authToken) {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         // 402 = pass requis, 429 = quota du jour : messages serveur affichés tels quels
-        return { ok: false, error: body?.detail || `HTTP ${res.status}` };
+        return { ok: false, error: body?.detail || "Le coach n'est pas disponible pour l'instant. Réessaie dans un instant." };
       }
       const data = await res.json();
       text = data?.answer || "";
@@ -1591,8 +1609,8 @@ async function callAi(prompt, aiSettings, authToken) {
     const cleaned = String(text).trim();
     if (!cleaned) throw new Error("Réponse vide");
     return { ok: true, text: cleaned };
-  } catch (e) {
-    return { ok: false, error: `Coach IA indisponible: ${String(e?.message || e)}. Réessaie dans un instant.` };
+  } catch {
+    return { ok: false, error: "Le coach n'est pas disponible pour l'instant. Réessaie dans un instant." };
   }
 }
 
@@ -1661,12 +1679,12 @@ async function callAiReview(q, code, aiSettings, authToken, mode = "exercise") {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        return { ok: false, error: body?.detail || `HTTP ${res.status}` };
+        return { ok: false, error: body?.detail || "La relecture n'est pas disponible pour l'instant. Réessaie dans un instant." };
       }
       const data = await res.json();
       return { ok: true, verdict: data?.verdict || null, comment: String(data?.comment || "").trim(), axes: normalizeAxes(data?.axes) };
-    } catch (e) {
-      return { ok: false, error: `Revue indisponible: ${String(e?.message || e)}. Réessaie dans un instant.` };
+    } catch {
+      return { ok: false, error: "La relecture n'est pas disponible pour l'instant. Réessaie dans un instant." };
     }
   }
   // Moteur local (dev) : on embarque les consignes de revue dans le prompt et on parse ici.
@@ -3493,7 +3511,7 @@ function AccountAuthForm({ ctx }) {
     try {
       await accountAuth(mode, mode === "login" ? { email, password } : { email, password, displayName });
     } catch (err) {
-      setError(String(err?.message || err));
+      setError(friendlyError(err, "Connexion impossible pour l'instant. Réessaie dans un instant."));
     } finally {
       setBusy(false);
     }
@@ -3541,7 +3559,7 @@ function ModalsHost({ ctx }) {
     exportProgress, copySave, copied,
     importText, setImportText, handleRestoreText, handleRestoreFile, restoreError,
     authToken, authUser, access, hasPass, accountLogout, accountSyncNow, syncStatus, syncBusy,
-    payPhone, setPayPhone, payBusy, payError, payment, startCheckout, recheckPayment, paymentHistory,
+    payPhone, setPayPhone, payBusy, payChecking, payError, payment, startCheckout, recheckPayment, paymentHistory,
     supportCategory, setSupportCategory, supportMessage, setSupportMessage, supportPaymentId,
     supportBusy, supportError, supportSent, supportTickets, openSupport, submitSupportTicket,
   } = ctx;
@@ -3553,7 +3571,8 @@ function ModalsHost({ ctx }) {
   const fmtDateTime = (iso) => new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const titles = { save: "SAUVEGARDER", restore: "RESTAURER", account: "COMPTE", pay: "ACCÈS COMPLET", support: "SUPPORT" };
   const payDeclined = payment && ["FAILED", "EXPIRED"].includes(payment.status);
-  const payTimedOut = payment && payment.status === "TIMEOUT";
+  const payWaiting = payment && PAY_WAITING_STATUSES.includes(payment.status);
+  const payStalled = payment && payment.status === "TIMEOUT"; // fenêtres auto épuisées
   const TICKET_STATUS_LABEL = { open: "Ouvert", in_progress: "En cours", resolved: "Résolu", closed: "Fermé" };
 
   return (
@@ -3701,30 +3720,25 @@ function ModalsHost({ ctx }) {
                 Retourner purifier la Stack
               </button>
             </div>
-          ) : payment && payment.status === "PROCESSING" ? (
+          ) : payWaiting ? (
             <div className="flex flex-col gap-3 text-center py-3">
-              <RefreshCw size={26} className="animate-spin mx-auto" style={{ color: AMBER }} />
-              <p className="font-mono text-sm font-bold">Valide le paiement sur ton téléphone</p>
-              <p className="text-xs leading-relaxed" style={{ color: TEXT_MUTED }}>
-                Une demande Mobile Money vient d'être envoyée au {payPhone}. Compose ton code secret pour confirmer —
-                l'accès s'activera ici automatiquement.
+              {payStalled
+                ? <Hourglass size={26} className="mx-auto" style={{ color: AMBER }} />
+                : <RefreshCw size={26} className="animate-spin mx-auto" style={{ color: AMBER }} />}
+              <p className="font-mono text-sm font-bold">
+                {payStalled ? "Toujours en attente de confirmation" : "Valide le paiement sur ton téléphone"}
               </p>
-            </div>
-          ) : payTimedOut ? (
-            <div className="flex flex-col gap-3 text-center py-3">
-              <Hourglass size={26} className="mx-auto" style={{ color: AMBER }} />
-              <p className="font-mono text-sm font-bold">Toujours en attente de confirmation</p>
               <p className="text-xs leading-relaxed" style={{ color: TEXT_MUTED }}>
-                PayMe n'a pas encore renvoyé de statut final après plusieurs minutes. Le paiement peut quand même
-                aboutir de son côté — vérifie maintenant, ou ferme cette fenêtre : l'accès s'active tout seul dès
-                que la confirmation arrive, même en arrière-plan.
+                {payStalled
+                  ? "La confirmation n'est pas encore arrivée. Si tu viens de valider sur ton téléphone, appuie sur « Vérifier maintenant ». Tu peux aussi fermer cette fenêtre : ton accès s'activera tout seul dès que le paiement est confirmé."
+                  : `Une demande de paiement a été envoyée au ${payPhone}. Ouvre-la sur ton téléphone et compose ton code secret pour confirmer — ton accès s'active ici tout seul dès que c'est validé.`}
               </p>
               <div className="flex gap-2">
-                <button onClick={recheckPayment} className="flex-1 px-3 py-2 rounded-lg font-mono text-xs flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
-                  <RefreshCw size={13} /> Vérifier maintenant
+                <button onClick={recheckPayment} disabled={payChecking} className="flex-1 px-3 py-2 rounded-lg font-mono text-xs flex items-center justify-center gap-2 disabled:opacity-50" style={{ backgroundColor: AMBER, color: BG }}>
+                  <RefreshCw size={13} className={payChecking ? "animate-spin" : ""} /> {payChecking ? "Vérification…" : "Vérifier maintenant"}
                 </button>
                 <button onClick={() => openSupport("paiement", payment.paymentId)} className="flex-1 px-3 py-2 rounded-lg font-mono text-xs flex items-center justify-center gap-2" style={{ border: `1px solid ${LINE}`, color: TEXT }}>
-                  <LifeBuoy size={13} /> Signaler
+                  <LifeBuoy size={13} /> Un souci ?
                 </button>
               </div>
             </div>
@@ -4650,6 +4664,7 @@ export default function FullstackQuest() {
   // Paiement Mobile Money en cours (checkout + polling)
   const [payPhone, setPayPhone] = useState("");
   const [payBusy, setPayBusy] = useState(false);
+  const [payChecking, setPayChecking] = useState(false); // vérification manuelle en cours
   const [payError, setPayError] = useState("");
   const [payment, setPayment] = useState(null); // { paymentId, status, passExpiresAt? }
   const payPollRef = useRef(0);
@@ -4725,7 +4740,7 @@ export default function FullstackQuest() {
             setAuthUser(null);
             setSyncStatus("Session expirée — reconnecte-toi.");
           } else {
-            setSyncStatus(`Compte hors-ligne: ${String(e?.message || e)}`);
+            setSyncStatus("Hors ligne — ta progression est gardée sur cet appareil et se synchronisera au retour du réseau.");
           }
         }
       }
@@ -4849,7 +4864,7 @@ export default function FullstackQuest() {
     if (authToken) {
       apiJson("/api/v1/me/profile", { token: authToken, method: "PUT", body: { profile: stamped } })
         .then(() => setSyncStatus(authUser ? `Compte synchronisé · ${authUser.user.displayName}` : "Progression synchronisée."))
-        .catch((e) => setSyncStatus(`Échec de synchro: ${String(e?.message || e)}`));
+        .catch(() => setSyncStatus("Synchro impossible pour l'instant — ta progression est gardée sur cet appareil."));
     }
   }
 
@@ -4900,8 +4915,8 @@ export default function FullstackQuest() {
       await persist(merged);
       setSyncStatus("Progression fusionnée avec le compte.");
       await refreshMe();
-    } catch (e) {
-      setSyncStatus(`Échec de synchro: ${String(e?.message || e)}`);
+    } catch {
+      setSyncStatus("Synchro impossible pour l'instant — ta progression est gardée sur cet appareil.");
     } finally {
       setSyncBusy(false);
     }
@@ -4925,42 +4940,65 @@ export default function FullstackQuest() {
       const res = await apiJson("/api/v1/pay/checkout", { token: authToken, method: "POST", body: { phone: payPhone } });
       setPayment({ paymentId: res.paymentId, status: res.status });
       const pollId = ++payPollRef.current;
-      pollPayment(res.paymentId, pollId, 0);
+      scheduleNextCheck(res.paymentId, pollId, 0);
     } catch (e) {
-      setPayError(String(e?.message || e));
+      setPayError(friendlyError(e, "La demande n'a pas pu être envoyée. Vérifie le numéro et réessaie."));
     } finally {
       setPayBusy(false);
     }
   }
 
-  async function pollPayment(id, pollId, attempt) {
-    if (payPollRef.current !== pollId) return; // un nouveau paiement a pris la main
-    if (attempt > 60) { // ~3 minutes
-      setPayment((p) => (p && p.paymentId === id ? { ...p, status: "TIMEOUT" } : p));
-      return;
-    }
+  // Une seule vérification du statut. Renvoie le statut reçu ("STALE" si un
+  // nouveau paiement a pris la main, null en cas de coupure réseau).
+  async function checkPaymentOnce(id, pollId) {
     try {
       const res = await apiJson(`/api/v1/pay/${id}`, { token: authToken });
-      if (payPollRef.current !== pollId) return;
+      if (payPollRef.current !== pollId) return "STALE";
       setPayment({ paymentId: id, status: res.status, passExpiresAt: res.passExpiresAt });
       if (res.status === "PAID") {
         try { SFX.victory(); } catch { /* silencieux */ }
         await refreshMe();
         refreshBank(); // les secteurs avancés arrivent avec le pass
-        return;
       }
-      if (res.status === "FAILED" || res.status === "EXPIRED") return;
-    } catch { /* réseau : on retentera au prochain tick */ }
-    window.setTimeout(() => pollPayment(id, pollId, attempt + 1), 3000);
+      return res.status;
+    } catch {
+      return null; // réseau : on retentera à la fenêtre suivante
+    }
   }
 
-  // Bouton "Vérifier maintenant" après un TIMEOUT : redémarre le polling sans
-  // relancer de checkout (le paiement PayMe est peut-être arrivé entre-temps).
-  function recheckPayment() {
-    if (!payment) return;
+  // Vérifications automatiques espacées : une fenêtre de 10s, puis 20s, puis
+  // 30s. Le timer de la fenêtre suivante ne démarre QU'APRÈS la réponse de la
+  // précédente (jamais deux appels en vol). Les fenêtres épuisées, on bascule
+  // en attente de vérification manuelle (statut TIMEOUT) sans jamais quitter la
+  // fenêtre d'attente : l'accès s'activera dès la confirmation.
+  function scheduleNextCheck(id, pollId, windowIndex) {
+    if (payPollRef.current !== pollId) return;
+    if (windowIndex >= PAY_POLL_WINDOWS_MS.length) {
+      setPayment((p) => (p && p.paymentId === id ? { ...p, status: "TIMEOUT" } : p));
+      return;
+    }
+    window.setTimeout(async () => {
+      if (payPollRef.current !== pollId) return;
+      const status = await checkPaymentOnce(id, pollId);
+      if (status === "STALE") return;
+      if (PAY_FINAL_STATUSES.includes(status)) return;
+      scheduleNextCheck(id, pollId, windowIndex + 1);
+    }, PAY_POLL_WINDOWS_MS[windowIndex]);
+  }
+
+  // Vérification manuelle : contrôle immédiat, puis on réamorce le cycle de
+  // fenêtres — le timer repart à la réponse de cette vérification.
+  async function recheckPayment() {
+    if (!payment || payChecking) return;
+    const id = payment.paymentId;
     const pollId = ++payPollRef.current;
-    setPayment((p) => ({ ...p, status: "PROCESSING" }));
-    pollPayment(payment.paymentId, pollId, 0);
+    setPayChecking(true);
+    setPayment((p) => (p && p.paymentId === id ? { ...p, status: "PROCESSING" } : p));
+    const status = await checkPaymentOnce(id, pollId);
+    setPayChecking(false);
+    if (status === "STALE") return;
+    if (PAY_FINAL_STATUSES.includes(status)) return;
+    scheduleNextCheck(id, pollId, 0);
   }
 
   /* --- Support (plaintes de paiement, bugs…) ------------------------------ */
@@ -4997,7 +5035,7 @@ export default function FullstackQuest() {
       setSupportSent(true);
       await loadSupportTickets();
     } catch (e) {
-      setSupportError(String(e?.message || e));
+      setSupportError(friendlyError(e, "Ton message n'a pas pu être envoyé. Réessaie dans un instant."));
     } finally {
       setSupportBusy(false);
     }
@@ -5538,7 +5576,7 @@ export default function FullstackQuest() {
     authToken, authUser, access, hasPass, accountAuth, accountLogout, accountSyncNow, refreshMe,
     syncStatus, syncBusy,
     modal, openModal, closeModal, restoreError, copied, copySave, handleRestoreText, handleRestoreFile,
-    payPhone, setPayPhone, payBusy, payError, payment, startCheckout, recheckPayment, paymentHistory,
+    payPhone, setPayPhone, payBusy, payChecking, payError, payment, startCheckout, recheckPayment, paymentHistory,
     supportCategory, setSupportCategory, supportMessage, setSupportMessage, supportPaymentId,
     supportBusy, supportError, supportSent, supportTickets, openSupport, submitSupportTicket,
     adminKey, setAdminKey, refreshBank, bankCount, exitAdmin,
