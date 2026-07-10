@@ -1324,6 +1324,18 @@ function mergeProfiles(a, b) {
     const cur = dailyRuns[day];
     dailyRuns[day] = !cur || (run.score || 0) > (cur.score || 0) ? run : cur;
   }
+  // Dossier de compétences : compteurs monotones → max par champ/axe. Jamais
+  // additionnés (une même revue synchronisée deux fois ne doit pas doubler).
+  const sa = a.skills || {}, sb = b.skills || {};
+  const weakAxes = { ...(sa.weakAxes || {}) };
+  for (const [axis, n] of Object.entries(sb.weakAxes || {})) {
+    weakAxes[axis] = Math.max(weakAxes[axis] || 0, n || 0);
+  }
+  const skills = {
+    reviewed: Math.max(sa.reviewed || 0, sb.reviewed || 0),
+    clean: Math.max(sa.clean || 0, sb.clean || 0),
+    weakAxes,
+  };
   return {
     ...FRESH,
     ...a,
@@ -1342,6 +1354,7 @@ function mergeProfiles(a, b) {
     chantier: { milestones },
     srsState,
     dailyRuns,
+    skills,
     updatedISO: new Date().toISOString(),
   };
 }
@@ -1423,7 +1436,28 @@ const FRESH = {
   chantier: { milestones: {} },
   qualification: { passed: false, bestScore: 0, attempts: 0 },
   technical: {},
+  // Dossier de compétences : cumul des verdicts de revue de code. Monotone
+  // (les compteurs ne font que croître), donc fusionnable par max sans perte.
+  skills: { reviewed: 0, clean: 0, weakAxes: {} },
 };
+
+/* Enregistre une revue dans le dossier de compétences. Pur : renvoie un nouveau
+   profil. reviewed/clean comptent les revues ; weakAxes cumule les axes signalés
+   faibles (verdict « à polir »). */
+function withReviewRecorded(profile, result) {
+  if (!result || !result.ok || !result.verdict) return profile;
+  const prev = profile.skills || { reviewed: 0, clean: 0, weakAxes: {} };
+  const weakAxes = { ...(prev.weakAxes || {}) };
+  for (const axis of result.axes || []) weakAxes[axis] = (weakAxes[axis] || 0) + 1;
+  return {
+    ...profile,
+    skills: {
+      reviewed: (prev.reviewed || 0) + 1,
+      clean: (prev.clean || 0) + (result.verdict === "propre" ? 1 : 0),
+      weakAxes,
+    },
+  };
+}
 
 /* Daily Challenge & SRS Helpers */
 function getTodaysSeed() {
@@ -1523,18 +1557,45 @@ async function callAi(prompt, aiSettings, authToken) {
   }
 }
 
+/* Axes de qualité — vocabulaire FERMÉ, en miroir de REVIEW_AXES côté serveur
+   (ai-server/main.py). Chaque revue « à polir » nomme le(s) axe(s) concerné(s) ;
+   le cumul par axe compose le « dossier de compétences » du joueur. */
+const REVIEW_AXES = {
+  nommage: "Nommage",
+  "lisibilité": "Lisibilité",
+  "simplicité": "Simplicité",
+  "robustesse": "Robustesse",
+  idiomes: "Idiomes JS",
+  structure: "Structure",
+};
+
+function normalizeAxes(list) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of list || []) {
+    const a = String(raw).trim().toLowerCase();
+    if (REVIEW_AXES[a] && !seen.has(a)) { seen.add(a); out.push(a); }
+  }
+  return out.slice(0, 3);
+}
+
 /* Revue de code — après que les tests passent, ADA relit la solution et rend
-   un verdict qualité ("propre" | "a_polir") + un commentaire. Le serveur FSQ
-   assemble le prompt et parse le verdict lui-même ; pour les moteurs de dev
-   locaux (Ollama / OpenAI-compatible) on reproduit le même contrat ici. */
+   un verdict qualité ("propre" | "a_polir") + un commentaire + les axes faibles.
+   Le serveur FSQ assemble le prompt et parse tout lui-même ; pour les moteurs de
+   dev locaux (Ollama / OpenAI-compatible) on reproduit le même contrat ici. */
 function parseReviewText(text) {
   const lines = String(text).trim().split("\n");
   const m = lines[0]?.match(/^\s*VERDICT\s*:\s*(PROPRE|[AÀ][_ ]?POLIR)\b/i);
-  if (m) {
-    const verdict = m[1].toUpperCase() === "PROPRE" ? "propre" : "a_polir";
-    return { verdict, comment: lines.slice(1).join("\n").trim() };
+  if (!m) return { verdict: null, comment: String(text).trim(), axes: [] };
+  const verdict = m[1].toUpperCase() === "PROPRE" ? "propre" : "a_polir";
+  const rest = [];
+  let axes = [];
+  for (const line of lines.slice(1)) {
+    const am = line.match(/^\s*AXES\s*:\s*(.+)$/i);
+    if (am && axes.length === 0) axes = normalizeAxes(am[1].split(/[,;/]| et /));
+    else rest.push(line);
   }
-  return { verdict: null, comment: String(text).trim() };
+  return { verdict, comment: rest.join("\n").trim(), axes: verdict === "a_polir" ? axes : [] };
 }
 
 async function callAiReview(q, code, aiSettings, authToken, mode = "exercise") {
@@ -1564,7 +1625,7 @@ async function callAiReview(q, code, aiSettings, authToken, mode = "exercise") {
         return { ok: false, error: body?.detail || `HTTP ${res.status}` };
       }
       const data = await res.json();
-      return { ok: true, verdict: data?.verdict || null, comment: String(data?.comment || "").trim() };
+      return { ok: true, verdict: data?.verdict || null, comment: String(data?.comment || "").trim(), axes: normalizeAxes(data?.axes) };
     } catch (e) {
       return { ok: false, error: `Revue indisponible: ${String(e?.message || e)}. Réessaie dans un instant.` };
     }
@@ -1582,8 +1643,8 @@ async function callAiReview(q, code, aiSettings, authToken, mode = "exercise") {
   ].filter(Boolean).join("\n");
   const r = await callAi(prompt, aiSettings, authToken);
   if (!r.ok) return r;
-  const { verdict, comment } = parseReviewText(r.text);
-  return { ok: true, verdict, comment: comment || r.text };
+  const { verdict, comment, axes } = parseReviewText(r.text);
+  return { ok: true, verdict, comment: comment || r.text, axes };
 }
 
 function ReviewVerdictBadge({ verdict }) {
@@ -1597,6 +1658,21 @@ function ReviewVerdictBadge({ verdict }) {
     <span className="px-2 py-0.5 rounded font-mono text-[11px] font-bold" style={{ backgroundColor: `${badge.color}22`, color: badge.color, border: `1px solid ${badge.color}` }}>
       {badge.label}
     </span>
+  );
+}
+
+/* Puces des axes de qualité à travailler, telles que nommées par la revue. */
+function AxisChips({ axes }) {
+  const list = (axes || []).filter((a) => REVIEW_AXES[a]);
+  if (list.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-2">
+      {list.map((a) => (
+        <span key={a} className="px-2 py-0.5 rounded-full font-mono text-[10px]" style={{ backgroundColor: `${AMBER}18`, color: AMBER, border: `1px solid ${AMBER}55` }}>
+          {REVIEW_AXES[a]}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -1631,6 +1707,7 @@ function CodeReviewPanel({ review, locked, onAsk, onUnlock, onResubmit }) {
       {review?.comment && (
         <MarkdownLite text={review.comment} className="text-xs leading-relaxed pr-1" style={{ color: TEXT, maxHeight: 180, overflowY: "auto" }} />
       )}
+      {review?.verdict === "a_polir" && <AxisChips axes={review.axes} />}
       {review?.verdict === "a_polir" && onResubmit && (
         <div className="mt-2">
           <button onClick={onResubmit} disabled={review?.busy} className="px-2 py-1 rounded-md font-mono text-[11px] disabled:opacity-50" style={{ backgroundColor: AMBER, color: BG }}>
@@ -2073,7 +2150,7 @@ function SrsView({ ctx }) {
 
 /* --- Chantier : capstone construit hors de l'app, suivi ici ---------- */
 function ChantierView({ ctx }) {
-  const { profile, setView, aiSettings, authToken, toggleMilestone } = ctx;
+  const { profile, setView, aiSettings, authToken, toggleMilestone, recordChantierReview } = ctx;
   const [openId, setOpenId] = useState(null);
   const [hints, setHints] = useState({}); // { [milestoneId]: { busy, text, error } }
   // Revue par jalon : le joueur colle le code de SON projet, ADA juge sur
@@ -2098,9 +2175,10 @@ function ChantierView({ ctx }) {
     setReviews((r) => ({
       ...r,
       [m.id]: result.ok
-        ? { ...r[m.id], busy: false, verdict: result.verdict, comment: result.comment, error: "" }
+        ? { ...r[m.id], busy: false, verdict: result.verdict, comment: result.comment, axes: result.axes || [], error: "" }
         : { ...r[m.id], busy: false, error: result.error },
     }));
+    if (result.ok) recordChantierReview(result);
   }
 
   async function requestHint(m) {
@@ -2237,6 +2315,7 @@ function ChantierView({ ctx }) {
                                 style={{ backgroundColor: PANEL_SOFT, color: TEXT, maxHeight: 220, overflowY: "auto" }}
                               />
                             )}
+                            {rev?.verdict === "a_polir" && <AxisChips axes={rev.axes} />}
                           </div>
                         );
                       })()}
@@ -3142,6 +3221,99 @@ function CodexView({ ctx }) {
   );
 }
 
+/* --- Dossier de compétences : forces/faiblesses tirées des revues de code -- */
+function SkillProfileView({ ctx }) {
+  const { profile, setView } = ctx;
+  const skills = profile.skills || { reviewed: 0, clean: 0, weakAxes: {} };
+  const reviewed = skills.reviewed || 0;
+  const clean = skills.clean || 0;
+  const weak = skills.weakAxes || {};
+  const cleanPct = reviewed > 0 ? Math.round((clean / reviewed) * 100) : 0;
+
+  // Tous les axes du vocabulaire, triés par nombre de signalements décroissant.
+  const axes = Object.keys(REVIEW_AXES).map((a) => ({ id: a, label: REVIEW_AXES[a], count: weak[a] || 0 }));
+  axes.sort((x, y) => y.count - x.count);
+  const maxCount = Math.max(1, ...axes.map((a) => a.count));
+  const flaggedCount = axes.filter((a) => a.count > 0).length;
+  const topWeak = axes[0]?.count > 0 ? axes[0] : null;
+  const strengths = axes.filter((a) => a.count === 0);
+
+  const adaLine = reviewed === 0
+    ? "Je n'ai encore relu aucun de tes codes. Termine un exercice de code ou un jalon du Chantier, puis demande-moi une relecture : je tiendrai ici le compte de ce que tu maîtrises et de ce qui mérite du travail."
+    : topWeak
+    ? `Sur ${reviewed} relecture${reviewed > 1 ? "s" : ""}, l'axe « ${topWeak.label} » est celui qui revient le plus souvent. Ce n'est pas un défaut — c'est ta prochaine marche. Vise-le au prochain duel.`
+    : `${reviewed} relecture${reviewed > 1 ? "s" : ""}, aucun axe qui traîne : ton code est régulier. Continue à demander des relectures pour garder la main.`;
+
+  return (
+    <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+        <button onClick={() => setView("map")} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+          <ArrowLeft size={14} /> Retour à la carte
+        </button>
+
+        <div className="flex items-center gap-2 mb-1">
+          <GraduationCap size={20} style={{ color: "#8ECAE6" }} />
+          <h2 className="font-mono font-bold text-xl">Dossier de compétences</h2>
+        </div>
+        <p className="text-sm mb-6 leading-relaxed" style={{ color: TEXT_MUTED }}>
+          Construit à partir des relectures d'ADA : ce que ton code réussit, et les axes qui reviennent quand il reste à polir.
+        </p>
+
+        <div className="mb-5">
+          <DialogueBubble name="ADA" text={adaLine} accent="#8ECAE6" avatar={<AdaAvatar mood={reviewed === 0 ? "idle" : topWeak ? "worried" : "happy"} size={44} />} />
+        </div>
+
+        {reviewed > 0 && (
+          <>
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <Frame accent="#8ECAE6" className="p-3">
+                <div style={{ backgroundColor: PANEL }} className="p-3 -m-3 rounded-sm text-center">
+                  <p className="font-mono text-2xl font-bold" style={{ color: TEXT }}>{reviewed}</p>
+                  <p className="font-mono text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>RELECTURES</p>
+                </div>
+              </Frame>
+              <Frame accent={cleanPct >= 50 ? SUCCESS : AMBER} className="p-3">
+                <div style={{ backgroundColor: PANEL }} className="p-3 -m-3 rounded-sm text-center">
+                  <p className="font-mono text-2xl font-bold" style={{ color: cleanPct >= 50 ? SUCCESS : AMBER }}>{cleanPct}%</p>
+                  <p className="font-mono text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>PROPRES DU 1ᵉ COUP</p>
+                </div>
+              </Frame>
+            </div>
+
+            <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: TEXT_MUTED }}>
+              AXES À TRAVAILLER {flaggedCount === 0 && "— aucun pour l'instant"}
+            </p>
+            <div className="flex flex-col gap-2 mb-6">
+              {axes.map((a) => (
+                <div key={a.id} className="flex items-center gap-3">
+                  <span className="font-mono text-xs w-24 shrink-0" style={{ color: a.count > 0 ? TEXT : TEXT_MUTED }}>{a.label}</span>
+                  <div className="flex-1 h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: PANEL_SOFT }}>
+                    <div className="h-full rounded-full" style={{ width: `${(a.count / maxCount) * 100}%`, backgroundColor: a === topWeak ? AMBER : a.count > 0 ? `${AMBER}99` : "transparent", transition: "width 300ms ease" }} />
+                  </div>
+                  <span className="font-mono text-[11px] w-6 text-right shrink-0" style={{ color: a.count > 0 ? AMBER : TEXT_MUTED }}>{a.count}</span>
+                </div>
+              ))}
+            </div>
+
+            {strengths.length > 0 && (
+              <>
+                <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: TEXT_MUTED }}>POINTS FORTS — jamais signalés</p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {strengths.map((a) => (
+                    <span key={a.id} className="px-2 py-0.5 rounded-full font-mono text-[10px]" style={{ backgroundColor: `${SUCCESS}18`, color: SUCCESS, border: `1px solid ${SUCCESS}55` }}>
+                      ✓ {a.label}
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* --- Admin : porte d'entrée (lien direct …/#admin) --------------------- */
 function AdminGateView({ ctx }) {
   const { setAdminKey, exitAdmin } = ctx;
@@ -3681,6 +3853,24 @@ function MapView({ ctx }) {
             <p className="text-xs" style={{ color: TEXT }}>Espacé</p>
           </button>
         </div>
+
+        {/* Dossier de compétences : forces/faiblesses tirées des revues de code d'ADA */}
+        <button
+          onClick={() => setView("skills")}
+          className="w-full p-3 rounded-lg text-left transition-colors hover:opacity-80 mb-3 flex items-center gap-3"
+          style={{ backgroundColor: "#8ECAE614", border: "1px solid #8ECAE6" }}
+        >
+          <GraduationCap size={18} style={{ color: "#8ECAE6" }} />
+          <div className="flex-1 min-w-0">
+            <p className="font-mono text-xs tracking-widest" style={{ color: "#8ECAE6" }}>📊 DOSSIER DE COMPÉTENCES</p>
+            <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>
+              {(profile.skills?.reviewed || 0) > 0
+                ? `${profile.skills.reviewed} relecture${profile.skills.reviewed > 1 ? "s" : ""} — vois tes forces et l'axe à travailler`
+                : "Fais relire ton code par ADA pour bâtir ton profil de qualité"}
+            </p>
+          </div>
+          <ChevronRight size={16} style={{ color: TEXT_MUTED }} />
+        </button>
 
         {/* Examen de Qualification : condition d'accès aux secteurs avancés + au Chantier.
             Réservé à l'accès complet — le bouton devient le point de conversion. */}
@@ -5127,13 +5317,22 @@ export default function FullstackQuest() {
       busy: false,
       verdict: result.verdict,
       comment: result.comment,
+      axes: result.axes || [],
       error: "",
       rewarded: review?.rewarded || result.verdict === "propre",
     });
+    // Alimente le dossier de compétences (persisté + synchronisé au compte).
+    persist(withReviewRecorded(profile, result));
     // Reflète le quota consommé sans attendre le prochain /auth/me.
     if (aiSettings.provider === "fsq-server" && authToken) {
       setAuthUser((u) => (u?.access ? { ...u, access: { ...u.access, aiUsedToday: (u.access.aiUsedToday || 0) + 1 } } : u));
     }
+  }
+
+  // Enregistrement d'une revue de Chantier dans le dossier (le composant
+  // ChantierView gère l'UI mais la persistance du profil vit ici).
+  function recordChantierReview(result) {
+    persist(withReviewRecorded(profile, result));
   }
 
   // Boucle « corrige et resoumets » : re-vérifie les tests avant de redemander
@@ -5199,7 +5398,7 @@ export default function FullstackQuest() {
     importText, setImportText, exportProgress, importProgress,
     aiSettings, setAiSettings, aiReady, aiStatus,
     aiHint, aiBusy, aiError, askLocalHint, clearAiHint,
-    review, askCodeReview, resubmitForReview,
+    review, askCodeReview, resubmitForReview, recordChantierReview,
     levelInfo, completedCount, badgeCount, nextIdx, adaGreet,
     isUnlocked, startModule, engage, backToMap, resetProgress,
     selectAnswer, runTests, moveLine, validateOrder, nextQuestion,
@@ -5231,6 +5430,7 @@ export default function FullstackQuest() {
   if (view === "chantier") return <><ChantierView ctx={ctx} />{chrome}</>;
   if (view === "qualification") return <><QualificationView ctx={ctx} />{chrome}</>;
   if (view === "technical") return <><TechnicalView ctx={ctx} />{chrome}</>;
+  if (view === "skills") return <><SkillProfileView ctx={ctx} />{chrome}</>;
   return <><MapView ctx={ctx} />{chrome}</>;
 }
 

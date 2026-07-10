@@ -103,6 +103,17 @@ SCOPE_SYSTEM_PROMPT = (
 )
 MAX_TOKENS_CEILING = 500
 
+# Axes de qualité — vocabulaire FERMÉ partagé avec le front (voir REVIEW_AXES
+# dans fullstack-quest.jsx). Quand la revue conclut « A_POLIR », elle nomme le
+# ou les axes concernés dans ce jeu exact ; le cumul par axe alimente le
+# « dossier de compétences » du joueur (forces/faiblesses).
+REVIEW_AXES = ("nommage", "lisibilité", "simplicité", "robustesse", "idiomes", "structure")
+_AXES_INSTRUCTION = (
+    "Si (et seulement si) A_POLIR, ajoute une 2e ligne « AXES: » suivie de 1 à 3 "
+    "axes concernés, séparés par des virgules, choisis EXACTEMENT dans cette "
+    "liste : " + ", ".join(REVIEW_AXES) + ". N'invente aucun autre mot."
+)
+
 # Revue de code : contrairement au coach (qui ne doit jamais donner la réponse),
 # la revue intervient APRÈS que les tests passent — juger la qualité et nommer
 # précisément l'amélioration est ici tout l'intérêt pédagogique.
@@ -114,12 +125,14 @@ REVIEW_SYSTEM_PROMPT = (
     "Réponds en français, dans ce format exact :\n"
     "Ligne 1 : « VERDICT: PROPRE » si tu accepterais ce code tel quel en revue "
     "professionnelle, sinon « VERDICT: A_POLIR ».\n"
+    + _AXES_INSTRUCTION + "\n"
     "Puis 2 à 4 phrases : d'abord ce qui est bien fait, puis — si A_POLIR — LA "
     "seule amélioration la plus utile, concrète (le nom exact à changer, l'idiome "
     "précis à utiliser), sans réécrire la solution complète à sa place. "
     "Sois exigeant mais encourageant. Pas de markdown lourd."
 )
 REVIEW_VERDICT_RE = re.compile(r"^\s*VERDICT\s*:\s*(PROPRE|[AÀ][_ ]?POLIR)\b", re.IGNORECASE)
+REVIEW_AXES_RE = re.compile(r"^\s*AXES\s*:\s*(.+)$", re.IGNORECASE)
 
 # Variante Chantier : ici rien n'est exécuté — le joueur colle le code d'un
 # jalon de son vrai projet. La revue juge la conformité aux critères
@@ -134,6 +147,7 @@ CHANTIER_REVIEW_SYSTEM_PROMPT = (
     "Réponds en français, dans ce format exact :\n"
     "Ligne 1 : « VERDICT: PROPRE » si les critères semblent remplis et que tu "
     "accepterais ce code en revue professionnelle, sinon « VERDICT: A_POLIR ».\n"
+    + _AXES_INSTRUCTION + "\n"
     "Puis 2 à 5 phrases : d'abord ce qui est bien, puis le point le plus important "
     "à corriger (critère manquant en priorité, sinon LA meilleure amélioration de "
     "qualité), concret et actionnable, sans réécrire la solution à sa place. "
@@ -168,7 +182,7 @@ async def _generate_stub(prompt: str, max_tokens: int, system_prompt: str) -> Tu
     if system_prompt is not SCOPE_SYSTEM_PROMPT:
         # Revue simulée (exercice ou chantier) dans le format contractuel, pour
         # tester le flux complet sans amont.
-        return f"VERDICT: A_POLIR\n[{model_label}] Revue simulée : la structure est correcte, mais un nom de variable pourrait être plus explicite.", {}
+        return f"VERDICT: A_POLIR\nAXES: nommage, lisibilité\n[{model_label}] Revue simulée : la structure est correcte, mais un nom de variable pourrait être plus explicite.", {}
     return f"[{model_label}] Réponse simulée pour: {prompt[:240]}", {}
 
 
@@ -621,16 +635,37 @@ class ReviewRequest(BaseModel):
 class ReviewResponse(BaseModel):
     verdict: Optional[str] = None    # "propre" | "a_polir" | None si format non respecté
     comment: str
+    axes: list = []                  # axes faibles (sous-ensemble de REVIEW_AXES), si A_POLIR
 
 
-def _parse_review(text: str) -> Tuple[Optional[str], str]:
+def _parse_axes(line: str) -> list:
+    """Ne garde que les axes du vocabulaire fermé (insensible à la casse),
+    sans doublon et dans l'ordre d'apparition — le reste est ignoré."""
+    seen, out = set(), []
+    for token in re.split(r"[,;/]| et ", line):
+        axis = token.strip().lower()
+        if axis in REVIEW_AXES and axis not in seen:
+            seen.add(axis)
+            out.append(axis)
+    return out[:3]
+
+
+def _parse_review(text: str) -> Tuple[Optional[str], str, list]:
     lines = text.strip().splitlines()
-    if lines:
-        m = REVIEW_VERDICT_RE.match(lines[0])
-        if m:
-            verdict = "propre" if m.group(1).upper() == "PROPRE" else "a_polir"
-            return verdict, "\n".join(lines[1:]).strip()
-    return None, text.strip()
+    if not lines:
+        return None, text.strip(), []
+    m = REVIEW_VERDICT_RE.match(lines[0])
+    if not m:
+        return None, text.strip(), []
+    verdict = "propre" if m.group(1).upper() == "PROPRE" else "a_polir"
+    rest, axes = [], []
+    for line in lines[1:]:
+        am = REVIEW_AXES_RE.match(line)
+        if am and not axes:
+            axes = _parse_axes(am.group(1))
+        else:
+            rest.append(line)
+    return verdict, "\n".join(rest).strip(), (axes if verdict == "a_polir" else [])
 
 
 @app.post("/api/v1/review", response_model=ReviewResponse)
@@ -660,8 +695,8 @@ async def review_code(req: ReviewRequest, x_api_key: Optional[str] = Header(defa
     answer, usage = await _dispatch_ai("\n".join(parts), 350, system_prompt)
     if user is not None:
         await accounts.record_tokens(user["id"], usage.get("in", 0), usage.get("out", 0))
-    verdict, comment = _parse_review(answer)
-    return ReviewResponse(verdict=verdict, comment=comment or "Revue indisponible — réessaie dans un instant.")
+    verdict, comment, axes = _parse_review(answer)
+    return ReviewResponse(verdict=verdict, comment=comment or "Revue indisponible — réessaie dans un instant.", axes=axes)
 
 
 @app.get("/healthz")
