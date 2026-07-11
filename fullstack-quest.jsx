@@ -1424,8 +1424,6 @@ const AUTH_CACHE_KEY = "fullstack-quest-auth-cache";
 const PARCOURS_NARRATION_KEY = "fullstack-quest-parcours-narration";
 // Résultat de défi joué hors-ligne, en attente d'envoi au serveur (classement).
 const PENDING_DAILY_KEY = "fullstack-quest-pending-daily";
-// L'accueil (landing) ne s'affiche qu'une fois, avant le premier défi.
-const LANDING_SEEN_KEY = "fullstack-quest-landing-seen";
 
 // Vérifications automatiques du paiement, espacées : 10s, puis 20s, puis 30s.
 // Ensuite on laisse la main à la vérification manuelle (bouton dans la modale).
@@ -4380,7 +4378,7 @@ function ParcoursView({ ctx }) {
 /* --- Classement plateforme : les meilleurs au Défi Quotidien --------- */
 /* --- Accueil : vitrine éducative, affichée une fois avant le premier défi --- */
 function LandingView({ ctx }) {
-  const { markLandingSeen, openModal, authUser } = ctx;
+  const { enterGame, openModal, authUser } = ctx;
   const values = [
     { Icon: Swords, title: "Apprends en combattant", text: "9 secteurs, des duels contre les bugs qui corrompent la Stack, et ADA — ta mentore — à chaque étape." },
     { Icon: GraduationCap, title: "Vise le « bien faire »", text: "ADA relit ton code : nommage, lisibilité, robustesse. Pas seulement « les tests passent » — du code qu'on peut lire, maintenir, faire évoluer." },
@@ -4425,11 +4423,14 @@ function LandingView({ ctx }) {
           Le tronc commun — JavaScript, ES6+, Asynchrone — est <strong style={{ color: TEXT }}>libre d'accès</strong>. L'accès complet ouvre les secteurs avancés, les épreuves techniques et le coach IA.
         </p>
 
-        <button onClick={() => markLandingSeen()} className="w-full py-3 rounded-lg font-mono text-sm mb-3 flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
-          <Play size={16} /> Commencer l'aventure
+        <button onClick={() => enterGame()} className="w-full py-3 rounded-lg font-mono text-sm mb-2 flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
+          <Play size={16} /> Entrer dans le jeu
         </button>
+        <p className="text-[11px] font-mono text-center mb-3" style={{ color: TEXT_MUTED }}>
+          Le Défi du jour t'attend juste après — chronométré, le même pour tous.
+        </p>
         {!authUser && (
-          <button onClick={() => { markLandingSeen(); openModal("account"); }} className="w-full py-2 rounded-lg font-mono text-xs" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
+          <button onClick={() => openModal("account")} className="w-full py-2 rounded-lg font-mono text-xs" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
             J'ai déjà un compte — me connecter
           </button>
         )}
@@ -4450,7 +4451,8 @@ function ProfileView({ ctx }) {
         const data = await apiJson(`/api/v1/profile/${encodeURIComponent(profileUserId)}`);
         // Réponse sans nom = forme inattendue (endpoint indisponible) → traité
         // comme introuvable plutôt que d'afficher un profil vide/incohérent.
-        if (!data || !data.displayName) throw new Error("not found");
+        // Erreur sans message : friendlyError retombe sur le libellé fr par défaut.
+        if (!data || !data.displayName) throw new Error();
         if (alive) setState({ busy: false, error: "", data });
       } catch (e) {
         if (alive) setState({ busy: false, error: friendlyError(e, "Ce profil n'est pas disponible."), data: null });
@@ -5571,12 +5573,11 @@ export default function FullstackQuest() {
   const [dailyScore, setDailyScore] = useState(0);
   const [dailyStartMs, setDailyStartMs] = useState(0);
 
-  // Accueil (landing) : une seule fois, avant le premier défi. Profil public :
-  // identifiant de compte ciblé par un lien #profile/<id> (consultable sans compte).
-  const [landingSeen, setLandingSeen] = useState(() => {
-    if (typeof window === "undefined") return true;
-    try { return !!window.localStorage.getItem(LANDING_SEEN_KEY); } catch { return false; }
-  });
+  // Accueil : porte d'entrée affichée à CHAQUE arrivée sur l'app (état de
+  // session, non persisté). On n'entre dans le jeu — et donc dans le gate défi —
+  // qu'en la quittant volontairement. Profil public : identifiant ciblé par un
+  // lien #profile/<id> (consultable sans compte, hors accueil/gate).
+  const [entered, setEntered] = useState(false);
   const [profileUserId, setProfileUserId] = useState("");
 
   // SRS Spaced Repetition
@@ -5702,10 +5703,7 @@ export default function FullstackQuest() {
     return () => window.removeEventListener("hashchange", applyHash);
   }, []);
 
-  function markLandingSeen() {
-    try { window.localStorage.setItem(LANDING_SEEN_KEY, "1"); } catch { /* ignore */ }
-    setLandingSeen(true);
-  }
+  function enterGame() { setEntered(true); }
 
   function openProfile(userId) {
     setProfileUserId(userId);
@@ -6579,7 +6577,7 @@ export default function FullstackQuest() {
     supportCategory, setSupportCategory, supportMessage, setSupportMessage, supportPaymentId,
     supportBusy, supportError, supportSent, supportTickets, openSupport, submitSupportTicket,
     adminKey, setAdminKey, refreshBank, bankCount, exitAdmin,
-    landingSeen, markLandingSeen, profileUserId, openProfile, closeProfile,
+    entered, enterGame, profileUserId, openProfile, closeProfile,
   };
 
   /* ------------------------------ ROUTAGE ------------------------------ */
@@ -6591,8 +6589,9 @@ export default function FullstackQuest() {
   if (view === "profile") return <><ProfileView ctx={ctx} />{chrome}</>;
   if (view === "admin") return <>{adminKey ? <AdminView ctx={ctx} /> : <AdminGateView ctx={ctx} />}{chrome}</>;
 
-  // Accueil : une seule fois, avant tout le reste (adoucit l'arrivée à froid).
-  if (!landingSeen) return <><LandingView ctx={ctx} />{chrome}</>;
+  // Accueil : porte d'entrée, à chaque arrivée. Le Défi ne s'intercale qu'ensuite,
+  // au moment d'entrer dans le jeu — jamais avant l'accueil.
+  if (!entered) return <><LandingView ctx={ctx} />{chrome}</>;
 
   // Gate obligatoire : tant que le Défi du Jour n'est pas fait, il barre l'accès
   // au reste (anti-fuite). Exception : le défi lui-même. Le gate ne lit que
