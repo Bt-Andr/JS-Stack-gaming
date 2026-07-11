@@ -474,7 +474,11 @@ const MODULES = [
         tests: [
           { call: "dernier([1, 2, 3])", expect: 3 },
           { call: "dernier(['a'])", expect: "a" },
-          { call: "dernier([])", expect: undefined }
+          // On teste le cas vide via une égalité booléenne plutôt qu'avec
+          // `expect: undefined` : ainsi la question reste représentable en banque
+          // (JSON ne sait pas sérialiser `undefined`) tout en vérifiant le même
+          // comportement (renvoyer undefined sur un tableau vide).
+          { call: "dernier([]) === undefined", expect: true }
         ],
         explain: "arr[arr.length - 1] accède au dernier index. Sur un tableau vide, length - 1 vaut -1 et arr[-1] est undefined : exactement le comportement attendu, sans cas particulier à écrire."
       }
@@ -1420,6 +1424,8 @@ const AUTH_CACHE_KEY = "fullstack-quest-auth-cache";
 const PARCOURS_NARRATION_KEY = "fullstack-quest-parcours-narration";
 // Résultat de défi joué hors-ligne, en attente d'envoi au serveur (classement).
 const PENDING_DAILY_KEY = "fullstack-quest-pending-daily";
+// L'accueil (landing) ne s'affiche qu'une fois, avant le premier défi.
+const LANDING_SEEN_KEY = "fullstack-quest-landing-seen";
 
 // Vérifications automatiques du paiement, espacées : 10s, puis 20s, puis 30s.
 // Ensuite on laisse la main à la vérification manuelle (bouton dans la modale).
@@ -3736,7 +3742,14 @@ function CodexView({ ctx }) {
 
 /* --- Dossier de compétences : forces/faiblesses tirées des revues de code -- */
 function SkillProfileView({ ctx }) {
-  const { profile, setView } = ctx;
+  const { profile, setView, authUser } = ctx;
+  const [shared, setShared] = useState(false);
+  function shareProfile() {
+    const id = authUser?.user?.id;
+    if (!id) return;
+    const url = `${window.location.origin}${window.location.pathname}#profile/${id}`;
+    navigator.clipboard?.writeText(url).then(() => { setShared(true); window.setTimeout(() => setShared(false), 2500); }, () => {});
+  }
   const skills = profile.skills || { reviewed: 0, clean: 0, weakAxes: {} };
   const reviewed = skills.reviewed || 0;
   const clean = skills.clean || 0;
@@ -3775,6 +3788,12 @@ function SkillProfileView({ ctx }) {
         <div className="mb-5">
           <DialogueBubble name="ADA" text={adaLine} accent="#8ECAE6" avatar={<AdaAvatar mood={reviewed === 0 ? "idle" : topWeak ? "worried" : "happy"} size={44} />} />
         </div>
+
+        {authUser && (
+          <button onClick={shareProfile} className="w-full py-2 rounded-lg font-mono text-xs mb-5 flex items-center justify-center gap-1.5" style={{ border: `1px solid #8ECAE6`, color: "#8ECAE6" }}>
+            <Copy size={13} /> {shared ? "Lien copié !" : "Partager mon profil public"}
+          </button>
+        )}
 
         {reviewed > 0 && (
           <>
@@ -4359,26 +4378,210 @@ function ParcoursView({ ctx }) {
 }
 
 /* --- Classement plateforme : les meilleurs au Défi Quotidien --------- */
-function LeaderboardView({ ctx }) {
-  const { setView, authToken, authUser, openModal } = ctx;
-  const [state, setState] = useState({ busy: true, error: "", entries: [], me: null });
+/* --- Accueil : vitrine éducative, affichée une fois avant le premier défi --- */
+function LandingView({ ctx }) {
+  const { markLandingSeen, openModal, authUser } = ctx;
+  const values = [
+    { Icon: Swords, title: "Apprends en combattant", text: "9 secteurs, des duels contre les bugs qui corrompent la Stack, et ADA — ta mentore — à chaque étape." },
+    { Icon: GraduationCap, title: "Vise le « bien faire »", text: "ADA relit ton code : nommage, lisibilité, robustesse. Pas seulement « les tests passent » — du code qu'on peut lire, maintenir, faire évoluer." },
+    { Icon: Crown, title: "Mesure ton niveau réel", text: "Un Défi quotidien commun à tous, chronométré et sans aide : un aperçu honnête de ce que tu vaux sous pression." },
+    { Icon: Compass, title: "Un parcours qui s'adapte", text: "Ton dossier de compétences révèle tes forces et l'axe à travailler ; le parcours te dit quoi faire ensuite." },
+  ];
+  return (
+    <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-2xl mx-auto px-4 py-10 sm:py-16">
+        <div className="text-center mb-8">
+          <p className="font-mono text-[11px] tracking-[0.25em] mb-2" style={{ color: TEXT_MUTED }}>LES GARDIENS DE LA STACK</p>
+          <h1 className="font-mono uppercase tracking-wide text-3xl sm:text-4xl font-bold mb-4">Fullstack://Quest</h1>
+          <p className="text-base sm:text-lg leading-relaxed mx-auto" style={{ color: TEXT, maxWidth: "34rem" }}>
+            Deviens capable de <strong style={{ color: AMBER }}>lire, écrire et faire évoluer</strong> n'importe quel code JavaScript — pas seulement de le faire marcher.
+          </p>
+        </div>
+
+        <div className="mb-8">
+          <DialogueBubble
+            name="ADA — Gardienne"
+            text="La Stack est corrompue par les Bugs. Je t'apprendrai à coder proprement, secteur par secteur — et je relirai ton code comme le ferait un vrai pair. Prêt·e à devenir un Gardien ?"
+            accent="#8ECAE6"
+            avatar={<AdaAvatar mood="idle" size={54} />}
+          />
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-3 mb-8">
+          {values.map(({ Icon, title, text }) => (
+            <Frame key={title} accent={AMBER} className="p-4">
+              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm h-full">
+                <div className="flex items-center gap-2 mb-2">
+                  <Icon size={18} style={{ color: AMBER }} />
+                  <h3 className="font-mono font-bold text-sm">{title}</h3>
+                </div>
+                <p className="text-[12px] leading-relaxed" style={{ color: TEXT_MUTED }}>{text}</p>
+              </div>
+            </Frame>
+          ))}
+        </div>
+
+        <p className="text-[12px] text-center leading-relaxed mb-6" style={{ color: TEXT_MUTED }}>
+          Le tronc commun — JavaScript, ES6+, Asynchrone — est <strong style={{ color: TEXT }}>libre d'accès</strong>. L'accès complet ouvre les secteurs avancés, les épreuves techniques et le coach IA.
+        </p>
+
+        <button onClick={() => markLandingSeen()} className="w-full py-3 rounded-lg font-mono text-sm mb-3 flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
+          <Play size={16} /> Commencer l'aventure
+        </button>
+        {!authUser && (
+          <button onClick={() => { markLandingSeen(); openModal("account"); }} className="w-full py-2 rounded-lg font-mono text-xs" style={{ border: `1px solid ${LINE}`, color: TEXT_MUTED }}>
+            J'ai déjà un compte — me connecter
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* --- Profil public : lecture seule, ouvrable par lien (référence PIP) ------ */
+function ProfileView({ ctx }) {
+  const { profileUserId, setView, authUser, closeProfile } = ctx;
+  const [state, setState] = useState({ busy: true, error: "", data: null });
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const data = await apiJson("/api/v1/leaderboard", { token: authToken || undefined });
+        const data = await apiJson(`/api/v1/profile/${encodeURIComponent(profileUserId)}`);
+        // Réponse sans nom = forme inattendue (endpoint indisponible) → traité
+        // comme introuvable plutôt que d'afficher un profil vide/incohérent.
+        if (!data || !data.displayName) throw new Error("not found");
+        if (alive) setState({ busy: false, error: "", data });
+      } catch (e) {
+        if (alive) setState({ busy: false, error: friendlyError(e, "Ce profil n'est pas disponible."), data: null });
+      }
+    })();
+    return () => { alive = false; };
+  }, [profileUserId]);
+
+  const p = state.data;
+  const level = p ? getLevelInfo(p.xp || 0) : null;
+  const skills = p?.skills || { reviewed: 0, clean: 0, weakAxes: {} };
+  const cleanPct = skills.reviewed > 0 ? Math.round((skills.clean / skills.reviewed) * 100) : 0;
+  const weak = skills.weakAxes || {};
+  const axes = Object.keys(REVIEW_AXES).map((a) => ({ id: a, label: REVIEW_AXES[a], count: weak[a] || 0 })).sort((x, y) => y.count - x.count);
+  const maxCount = Math.max(1, ...axes.map((a) => a.count));
+  const strengths = axes.filter((a) => a.count === 0);
+  const isMine = authUser?.user?.id && authUser.user.id === profileUserId;
+
+  return (
+    <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
+      <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+        <button onClick={() => closeProfile()} className="flex items-center gap-1 text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+          <ArrowLeft size={14} /> {isMine ? "Retour" : "Découvrir Fullstack Quest"}
+        </button>
+
+        {state.busy && <p className="font-mono text-sm text-center py-16" style={{ color: TEXT_MUTED }}>Chargement du profil…</p>}
+        {!state.busy && state.error && <p className="font-mono text-sm text-center py-16" style={{ color: DANGER }}>{state.error}</p>}
+
+        {p && (
+          <>
+            <div className="flex items-center gap-2 mb-1">
+              <GraduationCap size={20} style={{ color: "#8ECAE6" }} />
+              <h2 className="font-mono font-bold text-xl">{p.displayName}</h2>
+            </div>
+            <p className="text-xs font-mono mb-6" style={{ color: TEXT_MUTED }}>
+              {level?.label} · membre depuis {new Date(p.memberSince).toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}
+            </p>
+
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[
+                { v: `${p.sectorsCompleted}/${MODULES.length}`, k: "SECTEURS" },
+                { v: p.daily?.rank ? `#${p.daily.rank}` : "—", k: "RANG DÉFI" },
+                { v: `${p.daily?.streak || 0}🔥`, k: "SÉRIE (JOURS)" },
+              ].map(({ v, k }) => (
+                <Frame key={k} accent={AMBER} className="p-3">
+                  <div style={{ backgroundColor: PANEL }} className="p-3 -m-3 rounded-sm text-center">
+                    <p className="font-mono text-lg font-bold" style={{ color: AMBER }}>{v}</p>
+                    <p className="font-mono text-[9px] tracking-widest" style={{ color: TEXT_MUTED }}>{k}</p>
+                  </div>
+                </Frame>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              {[
+                { v: p.qualificationPassed ? "✓" : "—", k: "QUALIFIÉ", c: p.qualificationPassed ? SUCCESS : TEXT_MUTED },
+                { v: skills.reviewed, k: "RELECTURES", c: TEXT },
+                { v: `${cleanPct}%`, k: "PROPRES 1ᵉ COUP", c: cleanPct >= 50 ? SUCCESS : AMBER },
+              ].map(({ v, k, c }) => (
+                <Frame key={k} accent={LINE} className="p-3">
+                  <div style={{ backgroundColor: PANEL }} className="p-3 -m-3 rounded-sm text-center">
+                    <p className="font-mono text-lg font-bold" style={{ color: c }}>{v}</p>
+                    <p className="font-mono text-[9px] tracking-widest" style={{ color: TEXT_MUTED }}>{k}</p>
+                  </div>
+                </Frame>
+              ))}
+            </div>
+
+            {skills.reviewed > 0 && (
+              <>
+                <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: TEXT_MUTED }}>AXES DE QUALITÉ</p>
+                <div className="flex flex-col gap-2 mb-4">
+                  {axes.map((a) => (
+                    <div key={a.id} className="flex items-center gap-3">
+                      <span className="font-mono text-xs w-24 shrink-0" style={{ color: a.count > 0 ? TEXT : TEXT_MUTED }}>{a.label}</span>
+                      <div className="flex-1 h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: PANEL_SOFT }}>
+                        <div className="h-full rounded-full" style={{ width: `${(a.count / maxCount) * 100}%`, backgroundColor: a.count > 0 ? `${AMBER}99` : "transparent" }} />
+                      </div>
+                      <span className="font-mono text-[11px] w-6 text-right shrink-0" style={{ color: a.count > 0 ? AMBER : TEXT_MUTED }}>{a.count}</span>
+                    </div>
+                  ))}
+                </div>
+                {strengths.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {strengths.map((a) => (
+                      <span key={a.id} className="px-2 py-0.5 rounded-full font-mono text-[10px]" style={{ backgroundColor: `${SUCCESS}18`, color: SUCCESS, border: `1px solid ${SUCCESS}55` }}>{a.label}</span>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            <p className="text-[11px] font-mono mt-6 text-center" style={{ color: TEXT_MUTED }}>
+              Profil vérifié — les scores du Défi sont calculés par le serveur, pas déclarés par le joueur.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const LEADERBOARD_PERIODS = [
+  { id: "today", label: "Aujourd'hui" },
+  { id: "week", label: "7 jours" },
+  { id: "all", label: "Toujours" },
+];
+
+function LeaderboardView({ ctx }) {
+  const { setView, authToken, authUser, openModal, openProfile } = ctx;
+  const [period, setPeriod] = useState("today");
+  const [state, setState] = useState({ busy: true, error: "", entries: [], me: null });
+
+  useEffect(() => {
+    let alive = true;
+    setState((s) => ({ ...s, busy: true }));
+    (async () => {
+      try {
+        const data = await apiJson(`/api/v1/leaderboard?period=${period}`, { token: authToken || undefined });
         if (alive) setState({ busy: false, error: "", entries: data.entries || [], me: data.me || null });
       } catch (e) {
         if (alive) setState({ busy: false, error: friendlyError(e, "Le classement n'est pas disponible pour l'instant."), entries: [], me: null });
       }
     })();
     return () => { alive = false; };
-  }, [authToken]);
+  }, [authToken, period]);
 
   const myName = authUser?.user?.displayName;
   const medal = (r) => (r === 1 ? "🥇" : r === 2 ? "🥈" : r === 3 ? "🥉" : `#${r}`);
   const inTop = state.me && state.entries.some((e) => e.rank === state.me.rank);
+  const periodNote = period === "today" ? "aujourd'hui" : period === "week" ? "ces 7 derniers jours" : "au cumul";
 
   return (
     <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
@@ -4391,9 +4594,28 @@ function LeaderboardView({ ctx }) {
           <Crown size={20} style={{ color: AMBER }} />
           <h2 className="font-mono font-bold text-xl">Classement</h2>
         </div>
-        <p className="text-sm mb-6 leading-relaxed" style={{ color: TEXT_MUTED }}>
-          Les meilleurs au Défi Quotidien — le même examen pour tous, chaque jour. Classé au cumul de bonnes réponses, départagé par la précision.
+        <p className="text-sm mb-4 leading-relaxed" style={{ color: TEXT_MUTED }}>
+          Les meilleurs au Défi Quotidien — le même examen pour tous, chaque jour. Classé aux bonnes réponses {periodNote}, départagé par la précision.
         </p>
+
+        {/* Fenêtres : « qui est bon en ce moment » en plus du all-time, pour que
+            les nouveaux puissent rivaliser sans rattraper tout un historique. */}
+        <div className="flex gap-1.5 mb-6">
+          {LEADERBOARD_PERIODS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPeriod(p.id)}
+              className="flex-1 py-2 rounded-lg font-mono text-xs transition-colors"
+              style={{
+                backgroundColor: period === p.id ? AMBER : PANEL,
+                color: period === p.id ? BG : TEXT_MUTED,
+                border: `1px solid ${period === p.id ? AMBER : LINE}`,
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
 
         {state.busy && <p className="font-mono text-sm text-center py-8" style={{ color: TEXT_MUTED }}>Chargement…</p>}
         {!state.busy && state.error && <p className="font-mono text-sm text-center py-8" style={{ color: DANGER }}>{state.error}</p>}
@@ -4410,14 +4632,15 @@ function LeaderboardView({ ctx }) {
               {state.entries.map((e) => {
                 const isMe = myName && e.displayName === myName;
                 return (
-                  <div key={`${e.rank}-${e.displayName}`} className="grid grid-cols-[2.5rem_1fr_auto] gap-2 items-center px-3 py-2 rounded-lg"
+                  <button key={`${e.rank}-${e.userId || e.displayName}`} onClick={() => e.userId && openProfile(e.userId)}
+                    className="grid grid-cols-[2.5rem_1fr_auto] gap-2 items-center px-3 py-2 rounded-lg text-left transition-opacity hover:opacity-80"
                     style={{ backgroundColor: isMe ? `${AMBER}18` : PANEL, border: `1px solid ${isMe ? AMBER : LINE}` }}>
                     <span className="font-mono text-sm font-bold" style={{ color: e.rank <= 3 ? AMBER : TEXT_MUTED }}>{medal(e.rank)}</span>
                     <span className="font-mono text-sm truncate" style={{ color: TEXT }}>{e.displayName}{isMe && <span style={{ color: AMBER }}> · toi</span>}</span>
                     <span className="font-mono text-xs text-right" style={{ color: TEXT_MUTED }}>
                       <strong style={{ color: TEXT }}>{e.points}</strong> · {e.days}j · {Math.round((e.accuracy || 0) * 100)}%
                     </span>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -4540,6 +4763,12 @@ function MapView({ ctx }) {
               </div>
             </div>
 
+            {(access?.dailyStreak || 0) > 0 && (
+              <div className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-mono text-[11px]" style={{ backgroundColor: `${AMBER}18`, border: `1px solid ${AMBER}55`, color: AMBER }}>
+                🔥 {access.dailyStreak} jour{access.dailyStreak > 1 ? "s" : ""} d'affilée au Défi
+              </div>
+            )}
+
             {levelInfo.next && (
               <div className="mt-3">
                 <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: LINE }}>
@@ -4622,24 +4851,17 @@ function MapView({ ctx }) {
           )}
         </div>
 
-        {/* Classement & Révisions (le Défi du Jour, désormais obligatoire, est
-            relevé avant même d'atteindre la carte — plus de bouton de lancement ici). */}
-        <div className="mt-6 grid grid-cols-2 gap-3 mb-3">
-          <button
-            onClick={() => setView("leaderboard")}
-            className="p-4 rounded-lg text-center transition-colors hover:opacity-80"
-            style={{ backgroundColor: `${AMBER}22`, border: `1px solid ${AMBER}` }}
-          >
-            <p className="font-mono text-xs tracking-widest mb-1" style={{ color: AMBER }}>🏆 CLASSEMENT</p>
-            <p className="text-xs" style={{ color: TEXT }}>Les meilleurs du jour</p>
-          </button>
+        {/* Révisions espacées. Le Défi du Jour (obligatoire) est relevé avant
+            d'atteindre la carte, et le Classement n'a d'autre porte que l'écran
+            de fin de défi — pas de raccourci ici, volontairement. */}
+        <div className="mt-6 mb-3">
           <button
             onClick={() => ctx.startSrsSession?.()}
-            className="p-4 rounded-lg text-center transition-colors hover:opacity-80"
+            className="w-full p-4 rounded-lg text-center transition-colors hover:opacity-80"
             style={{ backgroundColor: `${SUCCESS}22`, border: `1px solid ${SUCCESS}` }}
           >
             <p className="font-mono text-xs tracking-widest mb-1" style={{ color: SUCCESS }}>🧠 RÉVISIONS</p>
-            <p className="text-xs" style={{ color: TEXT }}>Espacé</p>
+            <p className="text-xs" style={{ color: TEXT }}>Répétition espacée — consolide ce que tu as appris</p>
           </button>
         </div>
 
@@ -5349,6 +5571,14 @@ export default function FullstackQuest() {
   const [dailyScore, setDailyScore] = useState(0);
   const [dailyStartMs, setDailyStartMs] = useState(0);
 
+  // Accueil (landing) : une seule fois, avant le premier défi. Profil public :
+  // identifiant de compte ciblé par un lien #profile/<id> (consultable sans compte).
+  const [landingSeen, setLandingSeen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try { return !!window.localStorage.getItem(LANDING_SEEN_KEY); } catch { return false; }
+  });
+  const [profileUserId, setProfileUserId] = useState("");
+
   // SRS Spaced Repetition
   const [srsSessionItems, setSrsSessionItems] = useState([]);
   const [srsSessionIdx, setSrsSessionIdx] = useState(0);
@@ -5457,14 +5687,39 @@ export default function FullstackQuest() {
     } catch { /* ignore */ }
   }, [adminKey]);
 
-  // La console admin n'a aucun point d'entrée dans le jeu : uniquement le lien direct …/#admin.
+  // La console admin (#admin) et les profils publics (#profile/<id>) n'ont
+  // aucun point d'entrée dans le jeu : uniquement le lien direct. Le profil
+  // public contourne l'accueil et le gate défi (un recruteur doit pouvoir l'ouvrir).
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const applyHash = () => { if (window.location.hash === "#admin") setView("admin"); };
+    const applyHash = () => {
+      const h = window.location.hash;
+      if (h === "#admin") setView("admin");
+      else if (h.startsWith("#profile/")) { setProfileUserId(h.slice("#profile/".length)); setView("profile"); }
+    };
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
   }, []);
+
+  function markLandingSeen() {
+    try { window.localStorage.setItem(LANDING_SEEN_KEY, "1"); } catch { /* ignore */ }
+    setLandingSeen(true);
+  }
+
+  function openProfile(userId) {
+    setProfileUserId(userId);
+    if (typeof window !== "undefined") { try { window.location.hash = `#profile/${userId}`; } catch { /* ignore */ } }
+    setView("profile");
+  }
+
+  function closeProfile() {
+    if (typeof window !== "undefined" && window.location.hash.startsWith("#profile/")) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    setProfileUserId("");
+    setView("map");
+  }
 
   function exitAdmin() {
     if (typeof window !== "undefined" && window.location.hash === "#admin") {
@@ -6324,6 +6579,7 @@ export default function FullstackQuest() {
     supportCategory, setSupportCategory, supportMessage, setSupportMessage, supportPaymentId,
     supportBusy, supportError, supportSent, supportTickets, openSupport, submitSupportTicket,
     adminKey, setAdminKey, refreshBank, bankCount, exitAdmin,
+    landingSeen, markLandingSeen, profileUserId, openProfile, closeProfile,
   };
 
   /* ------------------------------ ROUTAGE ------------------------------ */
@@ -6331,17 +6587,21 @@ export default function FullstackQuest() {
   // par-dessus la vue courante, quelle qu'elle soit.
   const chrome = <><ModalsHost ctx={ctx} /><InstallPrompt /></>;
 
+  // Profil public et console admin : accès par lien direct, hors accueil/gate.
+  if (view === "profile") return <><ProfileView ctx={ctx} />{chrome}</>;
+  if (view === "admin") return <>{adminKey ? <AdminView ctx={ctx} /> : <AdminGateView ctx={ctx} />}{chrome}</>;
+
+  // Accueil : une seule fois, avant tout le reste (adoucit l'arrivée à froid).
+  if (!landingSeen) return <><LandingView ctx={ctx} />{chrome}</>;
+
   // Gate obligatoire : tant que le Défi du Jour n'est pas fait, il barre l'accès
-  // au reste (anti-fuite). Exceptions : le défi lui-même et la console admin
-  // (lien direct protégé par clé). Le gate ne lit que l'état daté local
-  // (dailyRuns[jour]), alimenté aussi par le serveur pour le cross-appareil.
+  // au reste (anti-fuite). Exception : le défi lui-même. Le gate ne lit que
+  // l'état daté local (dailyRuns[jour]), alimenté aussi par le serveur (cross-appareil).
   const dailyRef = getDailyReference();
   const dailyDone = !!profile.dailyRuns?.[dailyRef];
-  if (!dailyDone && view !== "daily" && view !== "admin") {
+  if (!dailyDone && view !== "daily") {
     return <><DailyGateView ctx={ctx} />{chrome}</>;
   }
-
-  if (view === "admin") return <>{adminKey ? <AdminView ctx={ctx} /> : <AdminGateView ctx={ctx} />}{chrome}</>;
   if (view === "codex") return <><CodexView ctx={ctx} />{chrome}</>;
   if (view === "intro") return <><IntroView ctx={ctx} />{chrome}</>;
   if (view === "battle") return <><BattleView ctx={ctx} />{chrome}</>;
