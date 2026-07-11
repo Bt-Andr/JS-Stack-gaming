@@ -87,6 +87,21 @@ async def active_pass_expiry(user_id: uuid.UUID) -> Optional[datetime]:
     return None
 
 
+async def active_tier(user_id: uuid.UUID) -> Optional[str]:
+    """Palier effectif = le plus élevé parmi les pass actifs. None = Découverte."""
+    pool = await core.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT DISTINCT tier FROM passes WHERE user_id = $1 AND expires_at > now()", user_id
+        )
+    tiers = {r["tier"] for r in rows}
+    if "mentorat" in tiers:
+        return "mentorat"
+    if tiers:  # un pass actif quel qu'il soit → au moins Intégral
+        return "integral"
+    return None
+
+
 async def consume_hint(user_id: uuid.UUID, daily_limit: int) -> Optional[int]:
     """Incrémente le compteur d'indices du jour si le quota le permet.
     Renvoie le nouveau compteur, ou None si le quota est atteint."""
@@ -122,6 +137,7 @@ async def record_tokens(user_id: uuid.UUID, tokens_in: int, tokens_out: int) -> 
 async def access_info(user_id: uuid.UUID) -> Dict[str, Any]:
     settings = await core.get_settings()
     exp = await active_pass_expiry(user_id)
+    tier = await active_tier(user_id)
     pool = await core.get_pool()
     async with pool.acquire() as conn:
         used = await conn.fetchval("SELECT hints FROM ai_usage WHERE user_id = $1 AND day = CURRENT_DATE", user_id)
@@ -132,12 +148,18 @@ async def access_info(user_id: uuid.UUID) -> Dict[str, Any]:
             "SELECT day FROM daily_results WHERE user_id = $1 ORDER BY day DESC LIMIT 400", user_id
         )
     return {
+        # hasPass = accès complet (Intégral ou Mentorat) ; tier précise le palier.
         "hasPass": exp is not None,
+        "tier": tier or "decouverte",
         "passExpiresAt": exp.isoformat() if exp else None,
         "aiDailyLimit": int(settings["aiDailyHints"]),
         "aiUsedToday": int(used or 0),
         "passPriceXaf": int(settings["passPriceXaf"]),
         "passDays": int(settings["passDays"]),
+        # Palier Mentorat (premium) : tarif + plafond de génération, réglables au dashboard.
+        "premiumPriceXaf": int(settings["premiumPriceXaf"]),
+        "premiumPassDays": int(settings["premiumPassDays"]),
+        "premiumGenDailyCap": int(settings["premiumGenDailyCap"]),
         # Le client force le défi tant que ce n'est pas fait (gate anti-fuite) ;
         # renvoyé ici, il tient donc à la connexion et sur tous les appareils.
         "dailyDoneToday": bool(daily_done),

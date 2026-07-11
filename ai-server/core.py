@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS passes (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_passes_user ON passes (user_id, expires_at DESC);
+-- Palier du pass : 'integral' (accès complet) ou 'mentorat' (premium, génération
+-- d'exercices sur mesure). Ajouté après coup → ALTER idempotent pour les bases existantes.
+ALTER TABLE passes ADD COLUMN IF NOT EXISTS tier text NOT NULL DEFAULT 'integral';
 
 CREATE TABLE IF NOT EXISTS ai_usage (
   user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -174,9 +177,15 @@ CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets (user_id,
 
 # Réglages produits, modifiables à chaud via l'admin (app_settings), sans redéploiement.
 SETTINGS_DEFAULTS: Dict[str, Any] = {
+    # Palier « Intégral » (accès complet actuel).
     "passPriceXaf": 1500,
     "passDays": 30,
     "aiDailyHints": 20,
+    # Palier « Mentorat » (premium) : exercices générés sur mesure. Réglable au
+    # dashboard comme le reste. genDailyCap = nb d'exercices générés/jour inclus.
+    "premiumPriceXaf": 5000,
+    "premiumPassDays": 30,
+    "premiumGenDailyCap": 15,
 }
 
 _pool = None

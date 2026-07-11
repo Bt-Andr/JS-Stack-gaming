@@ -460,6 +460,7 @@ class CompPassIn(BaseModel):
     email: str
     days: Optional[int] = None
     note: Optional[str] = None
+    tier: Optional[str] = None  # 'integral' (défaut) ou 'mentorat'
 
 
 @router.post("/api/v1/admin/passes")
@@ -475,7 +476,11 @@ async def admin_grant_pass(body: CompPassIn, x_admin_key: Optional[str] = Header
     if not email:
         raise HTTPException(status_code=400, detail="Email requis.")
     settings = await core.get_settings()
-    days = int(body.days) if body.days is not None else int(settings["passDays"])
+    tier = (body.tier or "integral").strip().lower()
+    if tier not in ("integral", "mentorat"):
+        raise HTTPException(status_code=400, detail="Palier invalide (integral ou mentorat).")
+    default_days = int(settings["premiumPassDays"]) if tier == "mentorat" else int(settings["passDays"])
+    days = int(body.days) if body.days is not None else default_days
     if days < 1 or days > 3650:
         raise HTTPException(status_code=400, detail="Durée invalide (1 à 3650 jours).")
     pool = await core.get_pool()
@@ -486,19 +491,22 @@ async def admin_grant_pass(body: CompPassIn, x_admin_key: Optional[str] = Header
             )
             if user is None:
                 raise HTTPException(status_code=404, detail="Aucun compte avec cet email.")
-            current = await conn.fetchval("SELECT max(expires_at) FROM passes WHERE user_id=$1", user["id"])
+            # On cumule sur un pass du même palier ; sinon on part de maintenant.
+            current = await conn.fetchval(
+                "SELECT max(expires_at) FROM passes WHERE user_id=$1 AND tier=$2", user["id"], tier
+            )
             base = current if current and current > _now() else _now()
             expires = base + timedelta(days=days)
             await conn.execute(
-                "INSERT INTO passes (user_id, starts_at, expires_at, source, payment_id) "
-                "VALUES ($1, now(), $2, 'admin', NULL)",
-                user["id"], expires,
+                "INSERT INTO passes (user_id, starts_at, expires_at, source, payment_id, tier) "
+                "VALUES ($1, now(), $2, 'admin', NULL, $3)",
+                user["id"], expires, tier,
             )
-    logger.info("Pass admin crédité à %s jusqu'au %s (note: %s)",
-                email, expires.isoformat(), (body.note or "")[:120])
+    logger.info("Pass admin (%s) crédité à %s jusqu'au %s (note: %s)",
+                tier, email, expires.isoformat(), (body.note or "")[:120])
     return {
         "email": user["email"], "displayName": user["display_name"],
-        "days": days, "expiresAt": expires.isoformat(),
+        "tier": tier, "days": days, "expiresAt": expires.isoformat(),
         "stacked": bool(current and current > _now()),
     }
 
@@ -507,6 +515,9 @@ class SettingsPatch(BaseModel):
     passPriceXaf: Optional[int] = None
     passDays: Optional[int] = None
     aiDailyHints: Optional[int] = None
+    premiumPriceXaf: Optional[int] = None
+    premiumPassDays: Optional[int] = None
+    premiumGenDailyCap: Optional[int] = None
 
 
 @router.get("/api/v1/admin/settings")
@@ -519,7 +530,7 @@ async def admin_get_settings(x_admin_key: Optional[str] = Header(default=None)):
 async def admin_patch_settings(body: SettingsPatch, x_admin_key: Optional[str] = Header(default=None)):
     core.require_admin(x_admin_key)
     patch: Dict[str, Any] = {}
-    for key in ("passPriceXaf", "passDays", "aiDailyHints"):
+    for key in ("passPriceXaf", "passDays", "aiDailyHints", "premiumPriceXaf", "premiumPassDays", "premiumGenDailyCap"):
         value = getattr(body, key)
         if value is not None:
             if value <= 0:
