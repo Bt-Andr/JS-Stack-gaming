@@ -4377,51 +4377,120 @@ function ParcoursView({ ctx }) {
 
 /* --- Classement plateforme : les meilleurs au Défi Quotidien --------- */
 /* --- Accueil : vitrine éducative, affichée une fois avant le premier défi --- */
+// Ancre de valeur de la landing : ce que « vaut » une formation pratique
+// encadrée de ce niveau, exprimée dans la devise probable du visiteur (déduite
+// de la langue du navigateur). Montants indicatifs par marché — un repère
+// honnête « l'équivalent de… », pas une conversion de change ni un prix facturé.
+const TRAINING_VALUE_BY_CURRENCY = {
+  XAF: { amount: 250000, locale: "fr-CM" },
+  XOF: { amount: 250000, locale: "fr-SN" },
+  EUR: { amount: 2500, locale: "fr-FR" },
+  USD: { amount: 3000, locale: "en-US" },
+  MAD: { amount: 20000, locale: "fr-MA" },
+  NGN: { amount: 1500000, locale: "en-NG" },
+};
+const REGION_CURRENCY = {
+  CM: "XAF", GA: "XAF", TD: "XAF", CF: "XAF", CG: "XAF", GQ: "XAF",
+  SN: "XOF", CI: "XOF", BJ: "XOF", BF: "XOF", ML: "XOF", NE: "XOF", TG: "XOF", GW: "XOF",
+  FR: "EUR", BE: "EUR", LU: "EUR", DE: "EUR", ES: "EUR", IT: "EUR",
+  MA: "MAD", NG: "NGN", US: "USD", GB: "USD", CA: "USD",
+};
+function localizedTrainingValue() {
+  let region = "CM";
+  try {
+    const lang = (typeof navigator !== "undefined" && ((navigator.languages && navigator.languages[0]) || navigator.language)) || "fr-CM";
+    const part = lang.split("-")[1];
+    if (part) region = part.toUpperCase();
+  } catch { /* défaut CEMAC */ }
+  const currency = REGION_CURRENCY[region] || "XAF";
+  const { amount, locale } = TRAINING_VALUE_BY_CURRENCY[currency] || TRAINING_VALUE_BY_CURRENCY.XAF;
+  try {
+    return new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
+  } catch {
+    return `${amount.toLocaleString("fr-FR")} ${currency}`;
+  }
+}
+
 function LandingView({ ctx }) {
   const { enterGame, openModal, authUser } = ctx;
-  const values = [
-    { Icon: Swords, title: "Apprends en combattant", text: "9 secteurs, des duels contre les bugs qui corrompent la Stack, et ADA — ta mentore — à chaque étape." },
-    { Icon: GraduationCap, title: "Vise le « bien faire »", text: "ADA relit ton code : nommage, lisibilité, robustesse. Pas seulement « les tests passent » — du code qu'on peut lire, maintenir, faire évoluer." },
-    { Icon: Crown, title: "Mesure ton niveau réel", text: "Un Défi quotidien commun à tous, chronométré et sans aide : un aperçu honnête de ce que tu vaux sous pression." },
-    { Icon: Compass, title: "Un parcours qui s'adapte", text: "Ton dossier de compétences révèle tes forces et l'axe à travailler ; le parcours te dit quoi faire ensuite." },
+  const trainingValue = localizedTrainingValue();
+  const stack = ["JavaScript", "ES6+", "Asynchrone", "TypeScript", "React", "Next.js", "Express", "Vite"];
+  const steps = [
+    { Icon: GraduationCap, title: "ADA repère tes faiblesses", text: "À chaque exercice, ta mentore IA relit ton code comme un pair et nomme précisément ce qui pèche — nommage, lisibilité, robustesse, structure. Pas une note : un diagnostic." },
+    { Icon: Compass, title: "Ton parcours cible ces lacunes", text: "Tes révisions et ta prochaine étape sont choisies pour te faire travailler exactement là où tu es faible. Pas un programme figé — le tien, qui évolue avec toi." },
+    { Icon: Zap, title: "Tu progresses vite, pour de bon", text: "Plus tu reviens, plus tôt tes défauts sont corrigés. La répétition espacée ancre ce que tu apprends au lieu de le laisser s'oublier." },
   ];
   return (
     <div className="min-h-screen w-full font-sans" style={{ backgroundColor: BG, color: TEXT }}>
       <div className="max-w-2xl mx-auto px-4 py-10 sm:py-16">
+        {/* Hero — l'objectif d'abord : le niveau visé */}
         <div className="text-center mb-8">
           <p className="font-mono text-[11px] tracking-[0.25em] mb-2" style={{ color: TEXT_MUTED }}>LES GARDIENS DE LA STACK</p>
           <h1 className="font-mono uppercase tracking-wide text-3xl sm:text-4xl font-bold mb-4">Fullstack://Quest</h1>
-          <p className="text-base sm:text-lg leading-relaxed mx-auto" style={{ color: TEXT, maxWidth: "34rem" }}>
-            Deviens capable de <strong style={{ color: AMBER }}>lire, écrire et faire évoluer</strong> n'importe quel code JavaScript — pas seulement de le faire marcher.
+          <p className="text-base sm:text-lg leading-relaxed mx-auto" style={{ color: TEXT, maxWidth: "36rem" }}>
+            Atteins un <strong style={{ color: AMBER }}>niveau avancé en JavaScript</strong> et ses frameworks — par la pratique, avec une formation qui s'adapte à <em>toi</em>.
           </p>
         </div>
 
-        <div className="mb-8">
+        <div className="mb-10">
           <DialogueBubble
-            name="ADA — Gardienne"
-            text="La Stack est corrompue par les Bugs. Je t'apprendrai à coder proprement, secteur par secteur — et je relirai ton code comme le ferait un vrai pair. Prêt·e à devenir un Gardien ?"
+            name="ADA — ta mentore"
+            text="Je ne te donne pas des vidéos à regarder. Tu écris du vrai code, je le relis comme le ferait un pair, je repère tes faiblesses — et je bâtis ta suite autour d'elles. C'est ça, se former pour de bon."
             accent="#8ECAE6"
             avatar={<AdaAvatar mood="idle" size={54} />}
           />
         </div>
 
-        <div className="grid sm:grid-cols-2 gap-3 mb-8">
-          {values.map(({ Icon, title, text }) => (
-            <Frame key={title} accent={AMBER} className="p-4">
-              <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm h-full">
-                <div className="flex items-center gap-2 mb-2">
-                  <Icon size={18} style={{ color: AMBER }} />
-                  <h3 className="font-mono font-bold text-sm">{title}</h3>
-                </div>
-                <p className="text-[12px] leading-relaxed" style={{ color: TEXT_MUTED }}>{text}</p>
-              </div>
-            </Frame>
-          ))}
-        </div>
+        {/* Objectif concret : le niveau + les frameworks nommés */}
+        <section className="mb-10">
+          <p className="font-mono text-[11px] tracking-[0.2em] mb-2" style={{ color: AMBER }}>TON OBJECTIF</p>
+          <h2 className="font-mono font-bold text-xl mb-2">Un niveau pro, sur toute la stack</h2>
+          <p className="text-sm leading-relaxed mb-4" style={{ color: TEXT_MUTED }}>
+            Du langage lui-même jusqu'à l'architecture d'une vraie application : les bases solides, puis TypeScript et les frameworks les plus demandés. Tu finis par <strong style={{ color: TEXT }}>construire un projet complet</strong> — pas par cocher des quiz.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {stack.map((s) => (
+              <span key={s} className="px-2.5 py-1 rounded-full font-mono text-[11px]" style={{ backgroundColor: `${AMBER}14`, color: AMBER, border: `1px solid ${AMBER}55` }}>{s}</span>
+            ))}
+          </div>
+        </section>
 
-        <p className="text-[12px] text-center leading-relaxed mb-6" style={{ color: TEXT_MUTED }}>
-          Le tronc commun — JavaScript, ES6+, Asynchrone — est <strong style={{ color: TEXT }}>libre d'accès</strong>. L'accès complet ouvre les secteurs avancés, les épreuves techniques et le coach IA.
-        </p>
+        {/* La formation sur mesure : la boucle faiblesses → correction */}
+        <section className="mb-10">
+          <p className="font-mono text-[11px] tracking-[0.2em] mb-2" style={{ color: AMBER }}>UNE FORMATION SUR MESURE</p>
+          <h2 className="font-mono font-bold text-xl mb-4">Elle s'adapte à toi, pas l'inverse</h2>
+          <div className="flex flex-col gap-3">
+            {steps.map(({ Icon, title, text }, i) => (
+              <Frame key={title} accent={AMBER} className="p-4">
+                <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm flex gap-3">
+                  <div className="flex flex-col items-center gap-1 shrink-0" style={{ width: 34 }}>
+                    <span className="font-mono text-[11px]" style={{ color: TEXT_MUTED }}>{`0${i + 1}`}</span>
+                    <Icon size={18} style={{ color: AMBER }} />
+                  </div>
+                  <div>
+                    <h3 className="font-mono font-bold text-sm mb-1">{title}</h3>
+                    <p className="text-[12.5px] leading-relaxed" style={{ color: TEXT_MUTED }}>{text}</p>
+                  </div>
+                </div>
+              </Frame>
+            ))}
+          </div>
+        </section>
+
+        {/* Ce que ça vaut : ancre de valeur (devise locale) vs. ce qu'on paie */}
+        <section className="mb-10">
+          <p className="font-mono text-[11px] tracking-[0.2em] mb-2" style={{ color: AMBER }}>CE QUE ÇA VAUT</p>
+          <Frame accent={SUCCESS} className="p-5">
+            <div style={{ backgroundColor: PANEL }} className="p-5 -m-5 rounded-sm">
+              <p className="text-sm leading-relaxed mb-3" style={{ color: TEXT }}>
+                Une formation pratique encadrée de ce niveau — l'équivalent d'un <strong>stage professionnel</strong> doublé d'un <strong>accompagnement sur mesure</strong> — vaut facilement <strong style={{ color: SUCCESS }}>{trainingValue}</strong>.
+              </p>
+              <p className="text-sm leading-relaxed" style={{ color: TEXT_MUTED }}>
+                Ici, tu l'as pour une fraction de ce prix. Et le tronc commun — JavaScript, ES6+, Asynchrone — est <strong style={{ color: TEXT }}>libre d'accès</strong> : tu peux commencer maintenant, sans rien payer.
+              </p>
+            </div>
+          </Frame>
+        </section>
 
         <button onClick={() => enterGame()} className="w-full py-3 rounded-lg font-mono text-sm mb-2 flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
           <Play size={16} /> Entrer dans le jeu
