@@ -306,93 +306,11 @@ async def _authorize_ai_call(authorization: Optional[str], x_api_key: Optional[s
     return user
 
 
-def _redis_configured() -> bool:
-    return bool(UPSTASH_URL and UPSTASH_TOKEN)
-
-
-async def _redis_get(key: str) -> Optional[str]:
-    async with httpx.AsyncClient(timeout=15) as client:
-        res = await client.get(f"{UPSTASH_URL}/get/{key}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"})
-        res.raise_for_status()
-        return res.json().get("result")
-
-
-async def _redis_set(key: str, value: str) -> None:
-    async with httpx.AsyncClient(timeout=15) as client:
-        res = await client.post(
-            f"{UPSTASH_URL}/set/{key}",
-            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
-            content=value.encode("utf-8"),
-        )
-        res.raise_for_status()
-
-
-def _hash_pin(pin: str) -> str:
-    return hashlib.sha256(pin.encode("utf-8")).hexdigest()
-
-
-def _profile_key(account: str) -> str:
-    return f"fsq:profile:{account}"
-
-
-def _pin_key(account: str) -> str:
-    return f"fsq:pin:{account}"
-
-
-def _require_sync_configured() -> None:
-    if not _redis_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="La synchronisation n'est pas configurée sur ce serveur (UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN manquants).",
-        )
-
-
-def _validate_account(account: str) -> None:
-    if not ACCOUNT_RE.match(account):
-        raise HTTPException(status_code=400, detail="Nom de compte invalide (3 à 32 caractères : lettres, chiffres, - ou _).")
-
-
-async def _check_pin(account: str, provided_pin: Optional[str]) -> None:
-    stored_hash = await _redis_get(_pin_key(account))
-    if stored_hash and (not provided_pin or _hash_pin(provided_pin) != stored_hash):
-        raise HTTPException(status_code=403, detail="PIN invalide ou manquant pour ce compte.")
-
-
-class ProfilePut(BaseModel):
-    profile: Dict[str, Any]
-    pin: Optional[str] = None
-
-
-class ProfileGetResponse(BaseModel):
-    profile: Optional[Dict[str, Any]] = None
-    updatedISO: Optional[str] = None
-
-
-@app.get("/api/v1/profile/{account}", response_model=ProfileGetResponse)
-async def get_profile(account: str, x_profile_pin: Optional[str] = Header(default=None)):
-    _require_sync_configured()
-    _validate_account(account)
-    await _check_pin(account, x_profile_pin)
-    raw = await _redis_get(_profile_key(account))
-    if raw is None:
-        return ProfileGetResponse(profile=None, updatedISO=None)
-    data = json.loads(raw)
-    return ProfileGetResponse(profile=data.get("profile"), updatedISO=data.get("updatedISO"))
-
-
-@app.put("/api/v1/profile/{account}")
-async def put_profile(account: str, body: ProfilePut, x_profile_pin: Optional[str] = Header(default=None)):
-    _require_sync_configured()
-    _validate_account(account)
-    stored_hash = await _redis_get(_pin_key(account))
-    if stored_hash:
-        await _check_pin(account, x_profile_pin)
-    elif body.pin:
-        # First write for this account with a PIN supplied: adopt it as the account's lock.
-        await _redis_set(_pin_key(account), _hash_pin(body.pin))
-    payload = json.dumps({"profile": body.profile, "updatedISO": datetime.now(timezone.utc).isoformat()})
-    await _redis_set(_profile_key(account), payload)
-    return {"ok": True}
+# Le sync legacy nom+PIN (profils dans Upstash Redis, endpoints
+# GET/PUT /api/v1/profile/{account}) est retiré : remplacé par les comptes
+# (JWT + profil par compte dans Postgres, voir accounts.py). Le client courant
+# ne l'appelle plus, et le chemin /api/v1/profile/{id} sert désormais le profil
+# public (daily.py). Les variables UPSTASH_* et ACCOUNT_RE ne sont plus lues.
 
 
 # ---------------------------------------------------------------------------

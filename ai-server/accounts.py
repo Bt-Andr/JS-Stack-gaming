@@ -128,6 +128,9 @@ async def access_info(user_id: uuid.UUID) -> Dict[str, Any]:
         daily_done = await conn.fetchval(
             "SELECT true FROM daily_results WHERE user_id = $1 AND day = (now() at time zone 'utc')::date", user_id
         )
+        streak_rows = await conn.fetch(
+            "SELECT day FROM daily_results WHERE user_id = $1 ORDER BY day DESC LIMIT 400", user_id
+        )
     return {
         "hasPass": exp is not None,
         "passExpiresAt": exp.isoformat() if exp else None,
@@ -138,7 +141,33 @@ async def access_info(user_id: uuid.UUID) -> Dict[str, Any]:
         # Le client force le défi tant que ce n'est pas fait (gate anti-fuite) ;
         # renvoyé ici, il tient donc à la connexion et sur tous les appareils.
         "dailyDoneToday": bool(daily_done),
+        # Régularité : jours de Défi consécutifs jusqu'à aujourd'hui (ou hier si
+        # pas encore fait aujourd'hui — la série n'est brisée qu'après un jour manqué).
+        "dailyStreak": _compute_streak([r["day"] for r in streak_rows]),
     }
+
+
+def _compute_streak(days_desc) -> int:
+    """days_desc : dates UTC des défis faits, décroissantes, une par jour."""
+    if not days_desc:
+        return 0
+    today = datetime.now(timezone.utc).date()
+    anchor = None
+    if days_desc[0] == today:
+        anchor = today
+    elif days_desc[0] == today - timedelta(days=1):
+        anchor = today - timedelta(days=1)
+    if anchor is None:
+        return 0  # dernier défi trop ancien : série brisée
+    streak = 0
+    expect = anchor
+    for d in days_desc:
+        if d == expect:
+            streak += 1
+            expect = expect - timedelta(days=1)
+        elif d < expect:
+            break
+    return streak
 
 
 def _public_user(row: Dict[str, Any]) -> Dict[str, Any]:

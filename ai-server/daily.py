@@ -12,6 +12,7 @@ consulter) : on n'y expose que le nom d'affichage, jamais l'email.
 """
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -118,14 +119,30 @@ async def daily_status(user: Dict[str, Any] = Depends(accounts.required_user)):
     return {"reference": _utc_today_ref(), "dailyDoneToday": bool(done)}
 
 
+# Fenêtres de classement. `period` est validé contre cet ensemble fixe puis
+# interpolé dans le SQL — aucune injection possible (valeurs closes).
+_PERIOD_WHERE = {
+    "today": "WHERE d.day = (now() at time zone 'utc')::date",
+    "week": "WHERE d.day > (now() at time zone 'utc')::date - 7",
+    "all": "",
+}
+
+
 @router.get("/api/v1/leaderboard")
 async def leaderboard(
+    period: str = "all",
     limit: int = 100,
     authorization: Optional[str] = Header(default=None),
 ):
     """Classement par performance au Défi Quotidien : cumul de bonnes réponses
-    (récompense la régularité), départage par précision. Public."""
+    (récompense la régularité), départage par précision. Public.
+
+    `period` = today | week | all : « qui est bon aujourd'hui / cette semaine »
+    en plus du all-time, pour que les nouveaux puissent rivaliser."""
     core.require_db()
+    if period not in _PERIOD_WHERE:
+        period = "all"
+    day_where = _PERIOD_WHERE[period]
     limit = max(1, min(int(limit), 200))
     pool = await core.get_pool()
     # Le rang de l'appelant est renvoyé même s'il est hors du top affiché.
@@ -135,48 +152,27 @@ async def leaderboard(
     except HTTPException:
         me = None  # session expirée : le classement reste consultable en invité
 
+    agg = (
+        f"SELECT d.user_id, sum(d.score) AS points, count(*) AS days, sum(d.total) AS attempted "
+        f"FROM daily_results d {day_where} GROUP BY d.user_id"
+    )
+    order = (
+        "ORDER BY a.points DESC, (a.points::float / NULLIF(a.attempted, 0)) DESC, a.days DESC"
+    )
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """
-            WITH agg AS (
-              SELECT d.user_id,
-                     sum(d.score)              AS points,
-                     count(*)                  AS days,
-                     sum(d.total)              AS attempted
-              FROM daily_results d
-              GROUP BY d.user_id
-            ),
-            ranked AS (
-              SELECT a.*, u.display_name,
-                     rank() OVER (
-                       ORDER BY a.points DESC,
-                                (a.points::float / NULLIF(a.attempted, 0)) DESC,
-                                a.days DESC
-                     ) AS rnk
-              FROM agg a JOIN users u ON u.id = a.user_id
-            )
-            SELECT * FROM ranked ORDER BY rnk LIMIT $1
-            """,
+            f"WITH agg AS ({agg}), "
+            f"ranked AS (SELECT a.*, u.display_name, u.id AS uid, rank() OVER ({order}) AS rnk "
+            f"           FROM agg a JOIN users u ON u.id = a.user_id) "
+            f"SELECT * FROM ranked ORDER BY rnk LIMIT $1",
             limit,
         )
         my_rank = None
         if me is not None:
             my_rank = await conn.fetchrow(
-                """
-                WITH agg AS (
-                  SELECT d.user_id, sum(d.score) AS points, count(*) AS days, sum(d.total) AS attempted
-                  FROM daily_results d GROUP BY d.user_id
-                ),
-                ranked AS (
-                  SELECT a.*, rank() OVER (
-                    ORDER BY a.points DESC,
-                             (a.points::float / NULLIF(a.attempted, 0)) DESC,
-                             a.days DESC
-                  ) AS rnk
-                  FROM agg a
-                )
-                SELECT rnk, points, days, attempted FROM ranked WHERE user_id = $1
-                """,
+                f"WITH agg AS ({agg}), "
+                f"ranked AS (SELECT a.*, rank() OVER ({order}) AS rnk FROM agg a) "
+                f"SELECT rnk, points, days, attempted FROM ranked WHERE user_id = $1",
                 me["id"],
             )
 
@@ -186,6 +182,7 @@ async def leaderboard(
         return {
             "rank": int(r["rnk"]),
             "displayName": r["display_name"],
+            "userId": str(r["uid"]),
             "points": points,
             "days": int(r["days"] or 0),
             "accuracy": round(points / attempted, 3) if attempted else 0.0,
@@ -202,4 +199,70 @@ async def leaderboard(
             "days": int(my_rank["days"] or 0),
             "accuracy": round(points / attempted, 3) if attempted else 0.0,
         }
-    return {"reference": _utc_today_ref(), "entries": entries, "me": mine}
+    return {"reference": _utc_today_ref(), "period": period, "entries": entries, "me": mine}
+
+
+@router.get("/api/v1/profile/{user_id}")
+async def public_profile(user_id: str):
+    """Profil PUBLIC en lecture seule : de quoi servir de référence (PIP) sans
+    rien exposer de sensible — nom d'affichage + parcours pédagogique + Défi.
+    Jamais d'email. Adressé par l'identifiant opaque du compte (non énumérable)."""
+    core.require_db()
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Profil introuvable.")
+    pool = await core.get_pool()
+    async with pool.acquire() as conn:
+        urow = await conn.fetchrow("SELECT id, display_name, created_at FROM users WHERE id = $1", uid)
+        if urow is None:
+            raise HTTPException(status_code=404, detail="Profil introuvable.")
+        prow = await conn.fetchrow("SELECT profile FROM user_profiles WHERE user_id = $1", uid)
+        agg = await conn.fetchrow(
+            "SELECT sum(score) AS points, count(*) AS days, sum(total) AS attempted "
+            "FROM daily_results WHERE user_id = $1",
+            uid,
+        )
+        rank = await conn.fetchval(
+            "WITH agg AS (SELECT user_id, sum(score) AS points, count(*) AS days, sum(total) AS attempted "
+            "             FROM daily_results GROUP BY user_id), "
+            "ranked AS (SELECT user_id, rank() OVER (ORDER BY points DESC, "
+            "           (points::float/NULLIF(attempted,0)) DESC, days DESC) AS rnk FROM agg) "
+            "SELECT rnk FROM ranked WHERE user_id = $1",
+            uid,
+        )
+        streak_rows = await conn.fetch(
+            "SELECT day FROM daily_results WHERE user_id = $1 ORDER BY day DESC LIMIT 400", uid
+        )
+
+    profile = prow["profile"] if prow else None
+    if isinstance(profile, str):
+        profile = json.loads(profile)
+    profile = profile or {}
+    results = profile.get("results") or {}
+    sectors_done = sum(1 for r in results.values() if isinstance(r, dict) and r.get("passed"))
+    skills = profile.get("skills") or {}
+    qualification = profile.get("qualification") or {}
+    points = int((agg["points"] if agg else 0) or 0)
+    attempted = int((agg["attempted"] if agg else 0) or 0)
+
+    return {
+        "displayName": urow["display_name"],
+        "memberSince": urow["created_at"].isoformat(),
+        "xp": int(profile.get("xp") or 0),
+        "sectorsCompleted": sectors_done,
+        "qualificationPassed": bool(qualification.get("passed")),
+        "qualificationBestScore": int(qualification.get("bestScore") or 0),
+        "skills": {
+            "reviewed": int(skills.get("reviewed") or 0),
+            "clean": int(skills.get("clean") or 0),
+            "weakAxes": skills.get("weakAxes") or {},
+        },
+        "daily": {
+            "rank": int(rank) if rank else None,
+            "points": points,
+            "days": int((agg["days"] if agg else 0) or 0),
+            "accuracy": round(points / attempted, 3) if attempted else 0.0,
+            "streak": accounts._compute_streak([r["day"] for r in streak_rows]),
+        },
+    }
