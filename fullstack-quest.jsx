@@ -1377,10 +1377,17 @@ function mergeProfiles(a, b) {
   for (const [axis, n] of Object.entries(sb.weakAxes || {})) {
     weakAxes[axis] = Math.max(weakAxes[axis] || 0, n || 0);
   }
+  // Journal : union par horodatage (sans perte, comme badges/lore), borné.
+  const logMap = new Map();
+  for (const e of [...(sa.log || []), ...(sb.log || [])]) {
+    if (e && e.ts != null) logMap.set(e.ts, e);
+  }
+  const log = [...logMap.values()].sort((x, y) => (x.ts || 0) - (y.ts || 0)).slice(-SKILL_LOG_CAP);
   const skills = {
     reviewed: Math.max(sa.reviewed || 0, sb.reviewed || 0),
     clean: Math.max(sa.clean || 0, sb.clean || 0),
     weakAxes,
+    log,
   };
   return {
     ...FRESH,
@@ -1507,25 +1514,56 @@ const FRESH = {
   technical: {},
   // Dossier de compétences : cumul des verdicts de revue de code. Monotone
   // (les compteurs ne font que croître), donc fusionnable par max sans perte.
-  skills: { reviewed: 0, clean: 0, weakAxes: {} },
+  // weakAxes = cumul (où tu pèches). log = journal daté des revues (borné), d'où
+  // l'on tire la faiblesse RÉCENTE et son ÉVOLUTION dans le temps.
+  skills: { reviewed: 0, clean: 0, weakAxes: {}, log: [] },
 };
 
 /* Enregistre une revue dans le dossier de compétences. Pur : renvoie un nouveau
    profil. reviewed/clean comptent les revues ; weakAxes cumule les axes signalés
    faibles (verdict « à polir »). */
+// Journal de revues borné : garde les ~200 dernières pour lire la faiblesse
+// récente et son évolution, sans faire grossir le profil indéfiniment.
+const SKILL_LOG_CAP = 200;
+
 function withReviewRecorded(profile, result) {
   if (!result || !result.ok || !result.verdict) return profile;
   const prev = profile.skills || { reviewed: 0, clean: 0, weakAxes: {} };
   const weakAxes = { ...(prev.weakAxes || {}) };
   for (const axis of result.axes || []) weakAxes[axis] = (weakAxes[axis] || 0) + 1;
+  const entry = { ts: Date.now(), verdict: result.verdict, axes: [...(result.axes || [])] };
+  const log = [...(prev.log || []), entry].slice(-SKILL_LOG_CAP);
   return {
     ...profile,
     skills: {
       reviewed: (prev.reviewed || 0) + 1,
       clean: (prev.clean || 0) + (result.verdict === "propre" ? 1 : 0),
       weakAxes,
+      log,
     },
   };
+}
+
+// Évolution par axe : compare la fenêtre récente à ce qui précède. Pur.
+// Renvoie, pour chaque axe du vocabulaire, son taux de signalement récent et
+// la tendance (improving = moins signalé qu'avant → en progrès).
+function computeSkillTrends(log, recentWindow = 20) {
+  const entries = (Array.isArray(log) ? log : []).slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const n = entries.length;
+  const recent = entries.slice(Math.max(0, n - recentWindow));
+  const earlier = entries.slice(0, Math.max(0, n - recentWindow));
+  const rate = (list, axis) => (list.length ? list.filter((e) => (e.axes || []).includes(axis)).length / list.length : 0);
+  const axes = Object.keys(REVIEW_AXES).map((a) => {
+    const recentRate = rate(recent, a);
+    const earlierRate = earlier.length ? rate(earlier, a) : null;
+    let trend = "stable";
+    if (earlierRate !== null) {
+      if (recentRate < earlierRate - 0.08) trend = "improving";
+      else if (recentRate > earlierRate + 0.08) trend = "worsening";
+    }
+    return { id: a, label: REVIEW_AXES[a], recentRate, earlierRate, trend, recentCount: recent.filter((e) => (e.axes || []).includes(a)).length };
+  });
+  return { axes, recentN: recent.length, hasHistory: earlier.length > 0, total: n };
 }
 
 /* Daily Challenge & SRS Helpers */
@@ -3749,6 +3787,8 @@ function SkillProfileView({ ctx }) {
     navigator.clipboard?.writeText(url).then(() => { setShared(true); window.setTimeout(() => setShared(false), 2500); }, () => {});
   }
   const skills = profile.skills || { reviewed: 0, clean: 0, weakAxes: {} };
+  const trends = computeSkillTrends(skills.log || []);
+  const evolAxes = trends.axes.filter((a) => a.recentCount > 0 || a.trend !== "stable");
   const reviewed = skills.reviewed || 0;
   const clean = skills.clean || 0;
   const weak = skills.weakAxes || {};
@@ -3824,6 +3864,32 @@ function SkillProfileView({ ctx }) {
                 </div>
               ))}
             </div>
+
+            {trends.hasHistory && evolAxes.length > 0 && (
+              <>
+                <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: "#8ECAE6" }}>
+                  ÉVOLUTION — sur tes {trends.recentN} dernières revues
+                </p>
+                <div className="flex flex-col gap-2 mb-6">
+                  {evolAxes.map((a) => {
+                    const pct = Math.round(a.recentRate * 100);
+                    const improving = a.trend === "improving";
+                    const worsening = a.trend === "worsening";
+                    const chipColor = improving ? SUCCESS : worsening ? DANGER : TEXT_MUTED;
+                    const chipText = improving ? "↓ en progrès" : worsening ? "↑ à surveiller" : "— stable";
+                    return (
+                      <div key={a.id} className="flex items-center gap-3">
+                        <span className="font-mono text-xs w-24 shrink-0" style={{ color: TEXT }}>{a.label}</span>
+                        <div className="flex-1 h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: PANEL_SOFT }}>
+                          <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: worsening ? DANGER : improving ? SUCCESS : `${AMBER}99`, transition: "width 300ms ease" }} />
+                        </div>
+                        <span className="font-mono text-[10px] shrink-0 text-right" style={{ color: chipColor, width: 82 }}>{chipText}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
 
             {strengths.length > 0 && (
               <>
