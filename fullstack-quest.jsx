@@ -4442,6 +4442,55 @@ function ParcoursView({ ctx }) {
 }
 
 /* --- Classement plateforme : les meilleurs au Défi Quotidien --------- */
+/* --- Paliers : Découverte (gratuit) · Intégral (accès complet) · Mentorat (premium sur mesure) --- */
+const TIERS = [
+  {
+    id: "decouverte", name: "Découverte", accent: "#8ECAE6",
+    price: () => "Gratuit",
+    lines: ["Fondation : JavaScript, ES6+, Asynchrone", "Défi quotidien + classement", "1 revue de code d'ADA par semaine"],
+  },
+  {
+    id: "integral", name: "Intégral", accent: AMBER,
+    price: (a) => `${(a?.passPriceXaf ?? 1500).toLocaleString("fr-FR")} XAF / ${a?.passDays ?? 30} j`,
+    lines: ["Tout Découverte, plus…", "6 secteurs avancés · Qualification · Épreuves · Chantier", "Coach IA : indices + revues (quota/jour)", "Parcours qui cible tes faiblesses"],
+  },
+  {
+    id: "mentorat", name: "Mentorat", accent: SUCCESS, soon: true,
+    price: (a) => `${(a?.premiumPriceXaf ?? 5000).toLocaleString("fr-FR")} XAF / ${a?.premiumPassDays ?? 30} j`,
+    lines: ["Tout Intégral, plus…", "ADA génère tes exercices sur mesure, ciblés sur tes faiblesses", "Modèle IA plus puissant, exercices auto-validés"],
+  },
+];
+
+function TierLadder({ access, currentTier }) {
+  return (
+    <div className="grid sm:grid-cols-3 gap-3">
+      {TIERS.map((t) => {
+        const active = currentTier === t.id;
+        return (
+          <Frame key={t.id} accent={t.accent} className="p-4">
+            <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm h-full flex flex-col">
+              <div className="flex items-center justify-between mb-1 gap-2">
+                <h3 className="font-mono font-bold text-sm" style={{ color: t.accent }}>{t.name}</h3>
+                {active
+                  ? <span className="font-mono text-[9px] px-1.5 py-0.5 rounded-full shrink-0" style={{ color: BG, backgroundColor: t.accent }}>TON PALIER</span>
+                  : t.soon && <span className="font-mono text-[9px] px-1.5 py-0.5 rounded-full shrink-0" style={{ color: t.accent, border: `1px solid ${t.accent}55` }}>BIENTÔT</span>}
+              </div>
+              <p className="font-mono text-xs mb-3" style={{ color: TEXT }}>{t.price(access)}</p>
+              <ul className="flex flex-col gap-1.5">
+                {t.lines.map((l, i) => (
+                  <li key={i} className="text-[11.5px] leading-snug flex gap-1.5" style={{ color: TEXT_MUTED }}>
+                    <span className="shrink-0" style={{ color: t.accent }}>▸</span>{l}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Frame>
+        );
+      })}
+    </div>
+  );
+}
+
 /* --- Accueil : vitrine éducative, affichée une fois avant le premier défi --- */
 // Ancre de valeur de la landing : ce que « vaut » une formation pratique
 // encadrée de ce niveau, exprimée dans la devise probable du visiteur (déduite
@@ -4478,7 +4527,7 @@ function localizedTrainingValue() {
 }
 
 function LandingView({ ctx }) {
-  const { enterGame, openModal, authUser } = ctx;
+  const { enterGame, openModal, authUser, access } = ctx;
   const trainingValue = localizedTrainingValue();
   const stack = ["JavaScript", "ES6+", "Asynchrone", "TypeScript", "React", "Next.js", "Express", "Vite"];
   const steps = [
@@ -4556,6 +4605,12 @@ function LandingView({ ctx }) {
               </p>
             </div>
           </Frame>
+        </section>
+
+        {/* Les 3 paliers — présentation (l'achat du Mentorat arrive après). */}
+        <section className="mb-10">
+          <p className="font-mono text-[11px] tracking-[0.2em] mb-3" style={{ color: AMBER }}>LES TROIS PALIERS</p>
+          <TierLadder access={access} currentTier={access?.tier} />
         </section>
 
         <button onClick={() => enterGame()} className="w-full py-3 rounded-lg font-mono text-sm mb-2 flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: BG }}>
@@ -4929,10 +4984,10 @@ function MapView({ ctx }) {
             <Unlock size={20} style={{ color: AMBER }} className="shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="font-mono text-xs tracking-widest mb-0.5" style={{ color: AMBER }}>
-                ACCÈS COMPLET — {passPrice.toLocaleString("fr-FR")} FCFA / {passDays} JOURS
+                PASSER À L'INTÉGRAL — {passPrice.toLocaleString("fr-FR")} FCFA / {passDays} JOURS
               </p>
               <p className="text-[11px] font-mono" style={{ color: TEXT_MUTED }}>
-                6 secteurs avancés · Qualification · Épreuves Techniques · Chantier · Coach IA — paiement Mobile Money
+                6 secteurs avancés · Qualification · Épreuves · Chantier · Coach IA · puis le palier Mentorat sur mesure
               </p>
             </div>
             <ChevronRight size={16} style={{ color: AMBER }} className="shrink-0" />
