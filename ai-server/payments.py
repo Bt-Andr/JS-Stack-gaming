@@ -52,13 +52,22 @@ async def _log_event(conn, payment_id: uuid.UUID, status: str, detail: Optional[
 
 class CheckoutIn(BaseModel):
     phone: str
+    tier: Optional[str] = None  # 'integral' (défaut) ou 'mentorat'
 
 
 @router.post("/api/v1/pay/checkout")
 async def checkout(body: CheckoutIn, user: Dict[str, Any] = Depends(accounts.required_user)):
     core.require_db()
     settings = await core.get_settings()
-    amount = int(settings["passPriceXaf"])
+    tier = (body.tier or "integral").strip().lower()
+    if tier not in ("integral", "mentorat"):
+        raise HTTPException(status_code=400, detail="Palier invalide (integral ou mentorat).")
+    # Le palier fixe le montant ET le 'kind' du paiement, relu à la validation
+    # pour créditer un pass du bon palier.
+    if tier == "mentorat":
+        amount, kind = int(settings["premiumPriceXaf"]), "mentorat30"
+    else:
+        amount, kind = int(settings["passPriceXaf"]), "pass30"
     phone = payme.normalize_cm_phone(body.phone)
     local_ref = uuid.uuid4()
 
@@ -66,8 +75,8 @@ async def checkout(body: CheckoutIn, user: Dict[str, Any] = Depends(accounts.req
     async with pool.acquire() as conn:
         payment = await conn.fetchrow(
             "INSERT INTO payments (user_id, kind, amount, currency, status, provider, local_ref, customer_phone) "
-            "VALUES ($1, 'pass30', $2, 'XAF', 'PENDING', 'PAYME', $3, $4) RETURNING *",
-            user["id"], amount, local_ref, phone,
+            "VALUES ($1, $2, $3, 'XAF', 'PENDING', 'PAYME', $4, $5) RETURNING *",
+            user["id"], kind, amount, local_ref, phone,
         )
         # La ligne d'audit est créée AVANT l'appel provider (INITIATION_PENDING),
         # puis mise à jour avec sa réponse — on garde une trace même si l'appel plante.
@@ -210,17 +219,22 @@ async def _apply_outcome(payment_id: uuid.UUID, outcome: str) -> None:
                 return
             if outcome == "SUCCEEDED":
                 settings = await core.get_settings()
-                days = int(settings["passDays"])
-                current = await conn.fetchval("SELECT max(expires_at) FROM passes WHERE user_id=$1", payment["user_id"])
+                is_mentorat = payment["kind"] == "mentorat30"
+                tier = "mentorat" if is_mentorat else "integral"
+                days = int(settings["premiumPassDays"]) if is_mentorat else int(settings["passDays"])
+                # Cumul par palier : un pass Mentorat ne « mange » pas le temps Intégral.
+                current = await conn.fetchval(
+                    "SELECT max(expires_at) FROM passes WHERE user_id=$1 AND tier=$2", payment["user_id"], tier
+                )
                 base = current if current and current > _now() else _now()
                 expires = base + timedelta(days=days)
                 await conn.execute(
-                    "INSERT INTO passes (user_id, starts_at, expires_at, source, payment_id) VALUES ($1, now(), $2, 'payme', $3)",
-                    payment["user_id"], expires, payment_id,
+                    "INSERT INTO passes (user_id, starts_at, expires_at, source, payment_id, tier) VALUES ($1, now(), $2, 'payme', $3, $4)",
+                    payment["user_id"], expires, payment_id, tier,
                 )
                 await conn.execute("UPDATE payments SET status='PAID', finalized_at=now() WHERE id=$1", payment_id)
-                await _log_event(conn, payment_id, "PAID", f"Pass crédité jusqu'au {expires.isoformat()}.")
-                logger.info("Pass crédité jusqu'au %s (paiement %s)", expires.isoformat(), payment_id)
+                await _log_event(conn, payment_id, "PAID", f"Pass {tier} crédité jusqu'au {expires.isoformat()}.")
+                logger.info("Pass %s crédité jusqu'au %s (paiement %s)", tier, expires.isoformat(), payment_id)
             else:
                 status = "EXPIRED" if outcome == "EXPIRED" else "FAILED"
                 await conn.execute("UPDATE payments SET status=$2, finalized_at=now() WHERE id=$1", payment_id, status)
