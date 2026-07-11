@@ -2825,6 +2825,7 @@ function AdminView({ ctx }) {
   // ou compte de test. Cumulable comme un achat, tracé source='admin'.
   const [grantEmail, setGrantEmail] = useState("");
   const [grantDays, setGrantDays] = useState("");
+  const [grantTier, setGrantTier] = useState("integral");
   const [grantBusy, setGrantBusy] = useState(false);
   const [grantResult, setGrantResult] = useState(null);
 
@@ -2834,7 +2835,7 @@ function AdminView({ ctx }) {
     setGrantBusy(true);
     setGrantResult(null);
     try {
-      const body = { email };
+      const body = { email, tier: grantTier };
       if (grantDays.trim()) body.days = parseInt(grantDays.trim(), 10);
       const res = await adminFetch("/api/v1/admin/passes", adminKey, { method: "POST", body: JSON.stringify(body) });
       setGrantResult(res);
@@ -2906,6 +2907,9 @@ function AdminView({ ctx }) {
           passPriceXaf: Number(monet.passPriceXaf),
           passDays: Number(monet.passDays),
           aiDailyHints: Number(monet.aiDailyHints),
+          premiumPriceXaf: Number(monet.premiumPriceXaf),
+          premiumPassDays: Number(monet.premiumPassDays),
+          premiumGenDailyCap: Number(monet.premiumGenDailyCap),
         }),
       });
       setMonet(saved);
@@ -3324,9 +3328,12 @@ function AdminView({ ctx }) {
                   <>
                     <div className="grid grid-cols-3 gap-2 mb-2">
                       {[
-                        ["passPriceXaf", "Prix (FCFA)"],
-                        ["passDays", "Durée (jours)"],
+                        ["passPriceXaf", "Intégral — Prix (FCFA)"],
+                        ["passDays", "Intégral — Durée (j)"],
                         ["aiDailyHints", "Indices IA / jour"],
+                        ["premiumPriceXaf", "Mentorat — Prix (FCFA)"],
+                        ["premiumPassDays", "Mentorat — Durée (j)"],
+                        ["premiumGenDailyCap", "Mentorat — Exos/jour"],
                       ].map(([key, label]) => (
                         <label key={key} className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
                           {label}
@@ -3476,14 +3483,18 @@ function AdminView({ ctx }) {
               <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: "#8ECAE6" }}>🎁 OFFRIR UN PASS</p>
               <div className="flex gap-2 flex-wrap items-center">
                 <input value={grantEmail} onChange={(e) => setGrantEmail(e.target.value)} placeholder="Email du compte" className="flex-1 min-w-[160px] px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
-                <input value={grantDays} onChange={(e) => setGrantDays(e.target.value)} placeholder="jours" title="Durée en jours (défaut : la durée du pass configurée)" className="w-20 px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
+                <select value={grantTier} onChange={(e) => setGrantTier(e.target.value)} title="Palier du pass" className="px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={selectStyle}>
+                  <option style={optStyle} value="integral">Intégral</option>
+                  <option style={optStyle} value="mentorat">Mentorat</option>
+                </select>
+                <input value={grantDays} onChange={(e) => setGrantDays(e.target.value)} placeholder="jours" title="Durée en jours (défaut : la durée du palier configurée)" className="w-20 px-2 py-1.5 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
                 <button onClick={grantPass} disabled={grantBusy || !grantEmail.trim()} className="px-3 py-1.5 rounded-md font-mono text-xs" style={{ backgroundColor: grantBusy || !grantEmail.trim() ? PANEL_SOFT : AMBER, color: grantBusy || !grantEmail.trim() ? TEXT_MUTED : BG, border: `1px solid ${AMBER}` }}>
                   {grantBusy ? "…" : "Créditer"}
                 </button>
               </div>
               {grantResult && (
                 <p className="text-[11px] font-mono mt-2" style={{ color: SUCCESS }}>
-                  ✓ {grantResult.email} · +{grantResult.days} j{grantResult.stacked ? " (cumulé)" : ""} · actif jusqu'au {new Date(grantResult.expiresAt).toLocaleDateString("fr-FR")}
+                  ✓ {grantResult.email} · {grantResult.tier || "integral"} · +{grantResult.days} j{grantResult.stacked ? " (cumulé)" : ""} · actif jusqu'au {new Date(grantResult.expiresAt).toLocaleDateString("fr-FR")}
                 </p>
               )}
             </div>
@@ -4021,13 +4032,16 @@ function ModalsHost({ ctx }) {
     supportCategory, setSupportCategory, supportMessage, setSupportMessage, supportPaymentId,
     supportBusy, supportError, supportSent, supportTickets, openSupport, submitSupportTicket,
   } = ctx;
+  const [payTier, setPayTier] = useState("integral");
   if (!modal) return null;
 
   const passPrice = access?.passPriceXaf ?? 1500;
   const passDays = access?.passDays ?? 30;
+  const premiumPrice = access?.premiumPriceXaf ?? 5000;
+  const premiumDays = access?.premiumPassDays ?? 30;
   const fmtDate = (iso) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
   const fmtDateTime = (iso) => new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-  const titles = { save: "SAUVEGARDER", restore: "RESTAURER", account: "COMPTE", pay: "ACCÈS COMPLET", support: "SUPPORT" };
+  const titles = { save: "SAUVEGARDER", restore: "RESTAURER", account: "COMPTE", pay: "CHOISIR UN PALIER", support: "SUPPORT" };
   const payDeclined = payment && ["FAILED", "EXPIRED"].includes(payment.status);
   const payWaiting = payment && PAY_WAITING_STATUSES.includes(payment.status);
   const payStalled = payment && payment.status === "TIMEOUT"; // fenêtres auto épuisées
@@ -4201,13 +4215,28 @@ function ModalsHost({ ctx }) {
               </div>
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs leading-relaxed" style={{ color: TEXT_MUTED }}>
-                Les 6 secteurs avancés (TS, React, Next.js, Express, Vite, Boss final), l'Examen de Qualification,
-                les Épreuves Techniques, le Chantier et le coach IA ({access?.aiDailyLimit ?? 20} indices/jour).
-              </p>
-              <p className="font-mono text-center text-2xl font-bold my-1" style={{ color: AMBER }}>
-                {passPrice.toLocaleString("fr-FR")} FCFA <span className="text-xs font-normal" style={{ color: TEXT_MUTED }}>/ {passDays} jours</span>
+            <div className="flex flex-col gap-3">
+              {/* Choix du palier */}
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: "integral", name: "Intégral", price: passPrice, days: passDays, desc: "Tout le contenu + coach IA", accent: AMBER },
+                  { id: "mentorat", name: "Mentorat", price: premiumPrice, days: premiumDays, desc: "+ exercices générés sur mesure", accent: SUCCESS },
+                ].map((p) => {
+                  const sel = payTier === p.id;
+                  return (
+                    <button key={p.id} onClick={() => setPayTier(p.id)} className="p-2.5 rounded-lg text-left transition-colors"
+                      style={{ border: `1px solid ${sel ? p.accent : LINE}`, backgroundColor: sel ? `${p.accent}14` : PANEL_SOFT }}>
+                      <p className="font-mono text-xs font-bold" style={{ color: p.accent }}>{p.name}</p>
+                      <p className="font-mono text-[13px] font-bold" style={{ color: TEXT }}>{p.price.toLocaleString("fr-FR")} F<span className="text-[9px] font-normal" style={{ color: TEXT_MUTED }}>/{p.days}j</span></p>
+                      <p className="text-[10px] leading-tight mt-0.5" style={{ color: TEXT_MUTED }}>{p.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: TEXT_MUTED }}>
+                {payTier === "mentorat"
+                  ? "Mentorat inclut tout l'Intégral, plus des exercices générés sur mesure ciblés sur tes faiblesses (auto-validés), sur un modèle IA plus puissant."
+                  : `Intégral : les 6 secteurs avancés, la Qualification, les Épreuves, le Chantier et le coach IA (${access?.aiDailyLimit ?? 20} indices/jour).`}
               </p>
               <label className="flex flex-col gap-1 text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
                 Numéro Mobile Money (MTN MoMo / Orange Money)
@@ -4220,8 +4249,8 @@ function ModalsHost({ ctx }) {
                   style={{ border: `1px solid ${LINE}`, color: TEXT }}
                 />
               </label>
-              <button onClick={startCheckout} disabled={payBusy || !payPhone.trim()} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: AMBER, color: BG }}>
-                <Smartphone size={14} /> {payBusy ? "Initialisation…" : "Payer par Mobile Money"}
+              <button onClick={() => startCheckout(payTier)} disabled={payBusy || !payPhone.trim()} className="px-3 py-2 rounded-lg font-mono text-sm flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: payTier === "mentorat" ? SUCCESS : AMBER, color: BG }}>
+                <Smartphone size={14} /> {payBusy ? "Initialisation…" : `Payer ${(payTier === "mentorat" ? premiumPrice : passPrice).toLocaleString("fr-FR")} F par Mobile Money`}
               </button>
               {payDeclined && (
                 <div className="flex flex-col gap-1.5">
@@ -6048,11 +6077,11 @@ export default function FullstackQuest() {
 
   /* --- Paiement du pass (PayMe : checkout puis polling) ------------------ */
 
-  async function startCheckout() {
+  async function startCheckout(tier = "integral") {
     setPayBusy(true);
     setPayError("");
     try {
-      const res = await apiJson("/api/v1/pay/checkout", { token: authToken, method: "POST", body: { phone: payPhone } });
+      const res = await apiJson("/api/v1/pay/checkout", { token: authToken, method: "POST", body: { phone: payPhone, tier } });
       setPayment({ paymentId: res.paymentId, status: res.status });
       const pollId = ++payPollRef.current;
       scheduleNextCheck(res.paymentId, pollId, 0);
