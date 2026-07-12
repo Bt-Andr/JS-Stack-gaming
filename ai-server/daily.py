@@ -34,9 +34,13 @@ def _utc_today_ref() -> str:
     return f"{now.year:04d}-{now.month:02d}-{now.day:02d}"
 
 
+MAX_REASONING_CHARS = 500
+
+
 class DailyAnswer(BaseModel):
     hash: str                 # content_hash de la question (moduleId|qcm|prompt)
     selected: Optional[int] = None
+    reasoning: Optional[str] = None  # texte libre facultatif ("pourquoi ce choix ?") — jamais noté, jamais jugé ici
 
 
 class DailySubmitIn(BaseModel):
@@ -79,10 +83,23 @@ async def submit_daily(body: DailySubmitIn, user: Dict[str, Any] = Depends(accou
         total = 0
         seen_hashes = set()
         seen_modules = set()
+        # Collecte pure (Phase 6) : jamais lu par le calcul de score ci-dessous,
+        # jamais jugé ici — juste stocké pour une future analyse. Accepté pour
+        # TOUTE réponse taguée (pas seulement les fausses) : plus simple côté
+        # serveur, et le client ne propose l'input qu'après une mauvaise réponse.
+        reasoning: Dict[str, str] = {}
         for a in body.answers:
+            if a.reasoning and a.reasoning.strip() and a.hash not in reasoning:
+                reasoning[a.hash] = a.reasoning.strip()[:MAX_REASONING_CHARS]
             q = by_hash.get(a.hash)
             if q is None or a.hash in seen_hashes:
                 continue  # inconnue en banque, ou doublon : non notée
+            # Classement ÉQUITABLE : on ne note que les modules de fondation,
+            # communs à TOUS (avec ou sans pass). Les secteurs avancés, réservés
+            # au pass, sont un bonus hors classement — sinon un non-abonné
+            # plafonne à 3 questions et un abonné à 9, ce qui fausse la comparaison.
+            if q["module_id"] not in core.FOUNDATION_MODULES:
+                continue
             # Anti-cherry-pick : une seule question comptée par module (le défi
             # légitime en tire une par secteur).
             if q["module_id"] in seen_modules:
@@ -97,11 +114,11 @@ async def submit_daily(body: DailySubmitIn, user: Dict[str, Any] = Depends(accou
         # Une seule tentative comptée par jour : la première gagne (c'est un
         # examen, pas un entraînement rejouable pour améliorer son rang).
         row = await conn.fetchrow(
-            "INSERT INTO daily_results (user_id, day, score, total, duration_ms) "
-            "VALUES ($1, (now() at time zone 'utc')::date, $2, $3, $4) "
+            "INSERT INTO daily_results (user_id, day, score, total, duration_ms, reasoning) "
+            "VALUES ($1, (now() at time zone 'utc')::date, $2, $3, $4, $5) "
             "ON CONFLICT (user_id, day) DO NOTHING "
             "RETURNING score, total",
-            user["id"], score, total, duration,
+            user["id"], score, total, duration, json.dumps(reasoning),
         )
     # Idempotent : si le jour était déjà enregistré, on renvoie ok sans écraser.
     return {"ok": True, "dailyDoneToday": True, "recorded": row is not None, "score": score, "total": total}
@@ -253,6 +270,7 @@ async def public_profile(user_id: str):
         "sectorsCompleted": sectors_done,
         "qualificationPassed": bool(qualification.get("passed")),
         "qualificationBestScore": int(qualification.get("bestScore") or 0),
+        "badges": list(profile.get("badges") or []),
         "skills": {
             "reviewed": int(skills.get("reviewed") or 0),
             "clean": int(skills.get("clean") or 0),

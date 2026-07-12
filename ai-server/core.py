@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS daily_results (
   PRIMARY KEY (user_id, day)
 );
 CREATE INDEX IF NOT EXISTS idx_daily_results_day ON daily_results (day);
+-- Raisonnement facultatif par réponse ({hash: texte}), collecté sans jugement
+-- (aucun appel IA, aucun impact sur score/total) — carburant pour une future
+-- détection de méprise conceptuelle. Ajouté après coup → ALTER idempotent.
+ALTER TABLE daily_results ADD COLUMN IF NOT EXISTS reasoning jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS app_settings (
   key        text PRIMARY KEY,

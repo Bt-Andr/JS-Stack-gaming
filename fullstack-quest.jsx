@@ -1269,6 +1269,7 @@ function isUsableRemote(r) {
 function mapRemoteQuestion(r) {
   const q = { qid: `r-${r.id}`, technical: !!r.technical, prompt: r.prompt };
   if (r.explain) q.explain = r.explain;
+  if (r.concept) q.concept = r.concept;
   if (r.qtype === "qcm") {
     q.options = r.options; q.correct = r.correct;
     if (r.code) q.code = r.code;
@@ -1287,6 +1288,7 @@ function mapRemoteQuestion(r) {
 function staticQuestionToBankPayload(q, moduleId) {
   const body = { moduleId, qtype: q.type || "qcm", technical: !!q.technical, prompt: q.prompt };
   if (q.explain) body.explain = q.explain;
+  if (q.concept) body.concept = q.concept;
   if (!q.type || q.type === "qcm") {
     body.qtype = "qcm";
     body.options = q.options;
@@ -1377,6 +1379,14 @@ function mergeProfiles(a, b) {
   for (const [axis, n] of Object.entries(sb.weakAxes || {})) {
     weakAxes[axis] = Math.max(weakAxes[axis] || 0, n || 0);
   }
+  // Maîtrise par concept (Phase 5) : même principe que weakAxes — compteurs
+  // monotones, max élément par élément (seen/correct séparément), jamais
+  // additionnés pour la même raison qu'au-dessus.
+  const conceptMastery = { ...(sa.conceptMastery || {}) };
+  for (const [concept, m] of Object.entries(sb.conceptMastery || {})) {
+    const cur = conceptMastery[concept] || { seen: 0, correct: 0 };
+    conceptMastery[concept] = { seen: Math.max(cur.seen || 0, m.seen || 0), correct: Math.max(cur.correct || 0, m.correct || 0) };
+  }
   // Journal : union par horodatage (sans perte, comme badges/lore), borné.
   const logMap = new Map();
   for (const e of [...(sa.log || []), ...(sb.log || [])]) {
@@ -1387,6 +1397,7 @@ function mergeProfiles(a, b) {
     reviewed: Math.max(sa.reviewed || 0, sb.reviewed || 0),
     clean: Math.max(sa.clean || 0, sb.clean || 0),
     weakAxes,
+    conceptMastery,
     log,
   };
   return {
@@ -1410,6 +1421,15 @@ function mergeProfiles(a, b) {
     skills,
     updatedISO: new Date().toISOString(),
   };
+}
+
+// "Parcours terminé" : les trois briques du curriculum borné (qualification,
+// épreuves techniques, chantier) réunies en un seul badge interne — jamais une
+// certification (voir docs produit : pas de licence vendue), juste le moment
+// qui dit que la formation est bouclée. La couche perpétuelle (SRS, Défi,
+// classement) n'a délibérément pas d'équivalent : elle continue après.
+function checkCurriculumComplete(qualified, badgesSet) {
+  return qualified && badgesSet.has("technical_master") && badgesSet.has("chantier_done");
 }
 
 const AI_SETTINGS_KEY = "fullstack-quest-ai-settings";
@@ -1793,6 +1813,28 @@ function computeParcours(profile, hasPass) {
     });
   }
 
+  // 7) Concept faible (Phase 5) — granularité plus fine que l'axe qualité :
+  // un concept avec au moins 2 réponses vues et une exactitude sous 60%
+  // ressort comme prochaine étape ciblée. Sans effet tant qu'aucune question
+  // taguée n'a été répondue (conceptMastery reste vide).
+  const conceptMastery = profile.skills?.conceptMastery || {};
+  const weakConcept = Object.entries(conceptMastery)
+    .filter(([, m]) => (m.seen || 0) >= 2 && (m.correct || 0) / m.seen < 0.6)
+    .sort((a, b) => (a[1].correct / a[1].seen) - (b[1].correct / b[1].seen))[0];
+  if (weakConcept) {
+    const [conceptId, m] = weakConcept;
+    steps.push({
+      id: "concept",
+      kind: "concept",
+      priority: 41,
+      title: `Revoir le concept « ${conceptId} »`,
+      rationale: `${m.correct}/${m.seen} bonnes réponses sur ce concept précis — plus fin que le secteur entier.`,
+      cta: "Voir mon dossier",
+      accent: "#8ECAE6",
+      action: { type: "skills" },
+    });
+  }
+
   steps.sort((a, b) => b.priority - a.priority);
   return {
     steps,
@@ -1801,6 +1843,24 @@ function computeParcours(profile, hasPass) {
     completedCount,
     allPassed: frontIdx === -1,
   };
+}
+
+// Horizon prospectif : les échéances SRS existent déjà (nextDueISO) mais ne
+// sont jamais agrégées en vue calendrier — ici on se contente de les répartir
+// par tranche. Aucune donnée nouvelle, aucun appel IA, calculé à l'affichage
+// (jamais persisté, donc hors de toute question de fusion/merge).
+function computeHorizon(profile, now = new Date()) {
+  const items = Object.values(profile.srsState || {});
+  const dayMs = 24 * 60 * 60 * 1000;
+  const bucket = { today: 0, in5: 0, in15: 0, total: items.length };
+  for (const item of items) {
+    if (!item?.nextDueISO) continue;
+    const daysUntil = (new Date(item.nextDueISO) - now) / dayMs;
+    if (daysUntil <= 0) bucket.today += 1;
+    else if (daysUntil <= 5) bucket.in5 += 1;
+    else if (daysUntil <= 15) bucket.in15 += 1;
+  }
+  return bucket;
 }
 
 // Couche hybride : le moteur ci-dessus reste la colonne vertébrale (gratuite,
@@ -2053,7 +2113,7 @@ function CodeReviewPanel({ review, locked, onAsk, onUnlock, onResubmit }) {
 
 /* --- Examen de Qualification ------------------------------------------ */
 function QualificationView({ ctx }) {
-  const { qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, setView, finishQualificationExam } = ctx;
+  const { qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, setView, finishQualificationExam, recordConceptAnswer } = ctx;
   const [selected, setSelected] = useState(null);
   const [answered, setAnswered] = useState(false);
   const [result, setResult] = useState(null);
@@ -2091,7 +2151,9 @@ function QualificationView({ ctx }) {
   const q = qualRun[qualQIdx];
   function handleAnswer() {
     if (selected === null) return;
-    if (selected === q.correct) { setQualScore((s) => s + 1); SFX.correct(1); } else { SFX.wrong(); }
+    const correct = selected === q.correct;
+    if (correct) { setQualScore((s) => s + 1); SFX.correct(1); } else { SFX.wrong(); }
+    recordConceptAnswer(q, correct);
     setAnswered(true);
   }
   function handleNext() {
@@ -2301,18 +2363,21 @@ function DailyGateView({ ctx }) {
 }
 
 function DailyView({ ctx }) {
-  const { dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, setView, profile, persist, submitDailyResult, authToken, openModal } = ctx;
+  const { dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, setView, profile, persist, submitDailyResult, authToken, openModal, recordConceptAnswer } = ctx;
   const [selected, setSelected] = useState(null);
   const [answered, setAnswered] = useState(false);
   const [timeLeft, setTimeLeft] = useState(DAILY_SECONDS_PER_Q);
   // Réponses réellement jouées (hors cartes d'abonnement), envoyées au serveur
   // pour notation. On ne stocke que le choix : le serveur détient les corrigés.
   const [answers, setAnswers] = useState([]);
+  // Raisonnement facultatif sur une mauvaise réponse (Phase 6) : collecte pure,
+  // jamais lu par le score — carburant pour une future détection de méprise.
+  const [reasoningInput, setReasoningInput] = useState("");
 
-  // Seules les questions jouables (secteurs accessibles) comptent : une question
-  // d'un secteur réservé au pass est remplacée par une invitation à l'abonnement
-  // et exclue du score — le total du jour est donc le nombre de questions jouables.
-  const scorableTotal = (dailyRun || []).filter((x) => !x.locked).length;
+  // Classement équitable : seules les questions de FONDATION comptent (communes
+  // à tous). Les secteurs avancés sont soit une invitation à l'abonnement (sans
+  // pass), soit un bonus hors classement (avec pass) — jamais dans le score.
+  const scorableTotal = (dailyRun || []).filter((x) => !x.advanced).length;
   const done = !dailyRun || dailyQIdx >= dailyRun.length;
   const q = done ? null : dailyRun[dailyQIdx];
   const isLocked = !done && !!q?.locked;
@@ -2338,9 +2403,11 @@ function DailyView({ ctx }) {
     // comptent pas). `selected` vaut null si le temps a été écoulé = raté.
     let nextAnswers = answers;
     if (cur && !cur.locked) {
-      nextAnswers = [...answers, { moduleId: cur.moduleId, prompt: cur.prompt, selected }];
+      const trimmedReasoning = reasoningInput.trim();
+      nextAnswers = [...answers, { moduleId: cur.moduleId, prompt: cur.prompt, selected, reasoning: trimmedReasoning || undefined }];
       setAnswers(nextAnswers);
     }
+    setReasoningInput("");
     const isLast = dailyQIdx + 1 >= dailyRun.length;
     if (isLast) {
       const ref = getDailyReference();
@@ -2385,8 +2452,11 @@ function DailyView({ ctx }) {
 
   function handleAnswer() {
     if (selected === null) return;
-    if (selected === q.correct) { setDailyScore((s) => s + 1); SFX.correct(1); }
+    // Un secteur avancé (bonus) ne crédite pas le score classé.
+    const correct = selected === q.correct;
+    if (correct) { if (!q.advanced) setDailyScore((s) => s + 1); SFX.correct(1); }
     else SFX.wrong();
+    recordConceptAnswer(q, correct);
     setAnswered(true);
   }
 
@@ -2432,6 +2502,9 @@ function DailyView({ ctx }) {
                 </div>
                 <span className="font-mono text-xs tabular-nums w-8 text-right" style={{ color: timeColor }}>{timeLeft}s</span>
               </div>
+              {q.advanced && (
+                <p className="font-mono text-[10px] tracking-widest mb-2" style={{ color: SUCCESS }}>★ BONUS — secteur avancé, hors classement</p>
+              )}
               <h4 className="font-mono font-bold mb-4">{q.prompt}</h4>
               <div className="space-y-2">
                 {q.options?.map((opt, idx) => (
@@ -2465,6 +2538,19 @@ function DailyView({ ctx }) {
                     </>
                   )}
                   {q.explain && <p className="text-xs mt-2 leading-relaxed" style={{ color: TEXT_MUTED }}>{q.explain}</p>}
+                  {selected !== q.correct && (
+                    <label className="flex flex-col gap-1 mt-3">
+                      <span className="font-mono text-[10px] tracking-widest" style={{ color: TEXT_MUTED }}>POURQUOI CE CHOIX ? (OPTIONNEL — n'affecte pas ton score)</span>
+                      <textarea
+                        value={reasoningInput}
+                        onChange={(e) => setReasoningInput(e.target.value)}
+                        rows={2}
+                        placeholder="Ce qui t'a fait hésiter ou choisir cette réponse…"
+                        className="w-full px-2 py-2 rounded-md text-xs resize-y focus:outline-none"
+                        style={{ backgroundColor: PANEL_SOFT, border: `1px solid ${LINE}`, color: TEXT }}
+                      />
+                    </label>
+                  )}
                   <button onClick={advance} className="w-full mt-4 py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: AMBER, color: BG }}>
                     {dailyQIdx + 1 < dailyRun.length ? "Suivant →" : "Terminer"}
                   </button>
@@ -2768,7 +2854,7 @@ function ChantierView({ ctx }) {
 /* --- Admin : enrichir la banque de questions centrale ----------------- */
 const EMPTY_FORM = {
   moduleId: "js-fond", qtype: "qcm", technical: false,
-  prompt: "", explain: "", code: "",
+  prompt: "", explain: "", code: "", concept: "",
   options: ["", ""], correct: 0,
   starter: "", tests: [{ call: "", expect: "" }],
   lines: ["", ""],
@@ -3053,6 +3139,7 @@ function AdminView({ ctx }) {
 
   function buildBody() {
     const body = { moduleId: form.moduleId, qtype: form.qtype, technical: isCodeLike ? form.technical : false, prompt: form.prompt, explain: form.explain };
+    if (form.concept.trim()) body.concept = form.concept.trim();
     if (form.qtype === "qcm") {
       body.options = form.options; body.correct = form.correct;
       if (form.code.trim()) body.code = form.code;
@@ -3109,7 +3196,7 @@ function AdminView({ ctx }) {
     setEditingId(q.id);
     setForm({
       moduleId: q.moduleId, qtype: q.qtype, technical: !!q.technical,
-      prompt: q.prompt || "", explain: q.explain || "", code: q.code || "",
+      prompt: q.prompt || "", explain: q.explain || "", code: q.code || "", concept: q.concept || "",
       options: q.options || ["", ""], correct: q.correct ?? 0,
       starter: q.starter || "",
       tests: (q.tests || [{ call: "", expect: "" }]).map((t) => ({ call: t.call, expect: JSON.stringify(t.expect) })),
@@ -3720,6 +3807,10 @@ function AdminView({ ctx }) {
                 <textarea value={form.explain} onChange={(e) => f({ explain: e.target.value })} rows={2} className="px-2 py-2 rounded-md text-sm resize-y focus:outline-none" style={inputStyle} />
               </label>
 
+              <label className="flex flex-col gap-1">{label("CONCEPT (OPTIONNEL — granularité fine, ex: closures, promises)")}
+                <input value={form.concept} onChange={(e) => f({ concept: e.target.value })} placeholder="laisser vide si aucun ne convient" className="px-2 py-2 rounded-md font-mono text-xs focus:outline-none" style={inputStyle} />
+              </label>
+
               <button
                 onClick={save}
                 disabled={saveBusy || !form.prompt.trim() || !solutionOk}
@@ -3842,6 +3933,15 @@ function SkillProfileView({ ctx }) {
           <button onClick={shareProfile} className="w-full py-2 rounded-lg font-mono text-xs mb-5 flex items-center justify-center gap-1.5" style={{ border: `1px solid #8ECAE6`, color: "#8ECAE6" }}>
             <Copy size={13} /> {shared ? "Lien copié !" : "Partager mon profil public"}
           </button>
+        )}
+
+        {(profile.badges || []).length > 0 && (
+          <>
+            <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: TEXT_MUTED }}>HAUTS FAITS</p>
+            <div className="flex flex-wrap gap-3 mb-6">
+              {profile.badges.map((id) => <BadgeChip key={id} id={id} earned />)}
+            </div>
+          </>
         )}
 
         {reviewed > 0 && (
@@ -4362,7 +4462,7 @@ function StepCard({ step, onRun, primary }) {
 }
 
 function ParcoursView({ ctx }) {
-  const { setView, parcours, runParcoursAction, hasPass, aiSettings, authToken } = ctx;
+  const { setView, parcours, runParcoursAction, hasPass, aiSettings, authToken, horizon } = ctx;
   const { steps, primary, allPassed } = parcours;
 
   // Signature de l'état courant : jour + suite ordonnée des étapes. Tant qu'elle
@@ -4417,6 +4517,26 @@ function ParcoursView({ ctx }) {
         <div className="mb-5">
           <DialogueBubble name="ADA" text={adaLine} accent="#8ECAE6" avatar={<AdaAvatar mood={primary ? "happy" : "proud"} size={44} />} />
         </div>
+
+        {horizon.total > 0 && (
+          <>
+            <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: TEXT_MUTED }}>HORIZON DES RÉVISIONS</p>
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              {[
+                { v: horizon.today, k: "AUJOURD'HUI" },
+                { v: horizon.in5, k: "DANS 5 JOURS" },
+                { v: horizon.in15, k: "DANS 15 JOURS" },
+              ].map(({ v, k }) => (
+                <Frame key={k} accent={v > 0 ? SUCCESS : LINE} className="p-3">
+                  <div style={{ backgroundColor: PANEL }} className="p-3 -m-3 rounded-sm text-center">
+                    <p className="font-mono text-lg font-bold" style={{ color: v > 0 ? SUCCESS : TEXT_MUTED }}>{v}</p>
+                    <p className="font-mono text-[9px] tracking-widest" style={{ color: TEXT_MUTED }}>{k}</p>
+                  </div>
+                </Frame>
+              ))}
+            </div>
+          </>
+        )}
 
         {primary && (
           <>
@@ -4556,8 +4676,7 @@ function localizedTrainingValue() {
 }
 
 function LandingView({ ctx }) {
-  const { enterGame, openModal, authUser, access } = ctx;
-  const trainingValue = localizedTrainingValue();
+  const { enterGame, openModal, authUser, access, setView } = ctx;
   const stack = ["JavaScript", "ES6+", "Asynchrone", "TypeScript", "React", "Next.js", "Express", "Vite"];
   const steps = [
     { Icon: GraduationCap, title: "ADA repère tes faiblesses", text: "À chaque exercice, ta mentore IA relit ton code comme un pair et nomme précisément ce qui pèche — nommage, lisibilité, robustesse, structure. Pas une note : un diagnostic." },
@@ -4627,10 +4746,10 @@ function LandingView({ ctx }) {
           <Frame accent={SUCCESS} className="p-5">
             <div style={{ backgroundColor: PANEL }} className="p-5 -m-5 rounded-sm">
               <p className="text-sm leading-relaxed mb-3" style={{ color: TEXT }}>
-                Une formation pratique encadrée de ce niveau — l'équivalent d'un <strong>stage professionnel</strong> doublé d'un <strong>accompagnement sur mesure</strong> — vaut facilement <strong style={{ color: SUCCESS }}>{trainingValue}</strong>.
+                L'équivalent d'un <strong>stage professionnel</strong> doublé d'un <strong>accompagnement sur mesure</strong>, mais <strong style={{ color: SUCCESS }}>plus de 80 % moins cher</strong> qu'une formation encadrée classique.
               </p>
               <p className="text-sm leading-relaxed" style={{ color: TEXT_MUTED }}>
-                Ici, tu l'as pour une fraction de ce prix. Et le tronc commun — JavaScript, ES6+, Asynchrone — est <strong style={{ color: TEXT }}>libre d'accès</strong> : tu peux commencer maintenant, sans rien payer.
+                Et le tronc commun — JavaScript, ES6+, Asynchrone — est <strong style={{ color: TEXT }}>libre d'accès</strong> : tu peux commencer maintenant, sans rien payer.
               </p>
             </div>
           </Frame>
@@ -4653,6 +4772,9 @@ function LandingView({ ctx }) {
             J'ai déjà un compte — me connecter
           </button>
         )}
+        <button onClick={() => setView("leaderboard")} className="w-full mt-3 py-2 rounded-lg font-mono text-xs flex items-center justify-center gap-1.5 hover:opacity-80 transition-opacity" style={{ color: AMBER }}>
+          <Crown size={13} /> Voir les meilleurs développeurs de la plateforme
+        </button>
       </div>
     </div>
   );
@@ -4761,6 +4883,15 @@ function ProfileView({ ctx }) {
                     ))}
                   </div>
                 )}
+              </>
+            )}
+
+            {(p.badges || []).length > 0 && (
+              <>
+                <p className="font-mono text-[11px] tracking-widest mb-2" style={{ color: TEXT_MUTED }}>HAUTS FAITS</p>
+                <div className="flex flex-wrap gap-3 mb-6">
+                  {p.badges.map((id) => <BadgeChip key={id} id={id} earned />)}
+                </div>
               </>
             )}
 
@@ -5072,17 +5203,23 @@ function MapView({ ctx }) {
           )}
         </div>
 
-        {/* Révisions espacées. Le Défi du Jour (obligatoire) est relevé avant
-            d'atteindre la carte, et le Classement n'a d'autre porte que l'écran
-            de fin de défi — pas de raccourci ici, volontairement. */}
-        <div className="mt-6 mb-3">
+        {/* Révisions espacées + Classement (accessible aussi en cours de partie). */}
+        <div className="mt-6 mb-3 grid grid-cols-2 gap-3">
           <button
             onClick={() => ctx.startSrsSession?.()}
-            className="w-full p-4 rounded-lg text-center transition-colors hover:opacity-80"
+            className="p-4 rounded-lg text-center transition-colors hover:opacity-80"
             style={{ backgroundColor: `${SUCCESS}22`, border: `1px solid ${SUCCESS}` }}
           >
             <p className="font-mono text-xs tracking-widest mb-1" style={{ color: SUCCESS }}>🧠 RÉVISIONS</p>
-            <p className="text-xs" style={{ color: TEXT }}>Répétition espacée — consolide ce que tu as appris</p>
+            <p className="text-xs" style={{ color: TEXT }}>Consolide tes acquis</p>
+          </button>
+          <button
+            onClick={() => setView("leaderboard")}
+            className="p-4 rounded-lg text-center transition-colors hover:opacity-80"
+            style={{ backgroundColor: `${AMBER}22`, border: `1px solid ${AMBER}` }}
+          >
+            <p className="font-mono text-xs tracking-widest mb-1" style={{ color: AMBER }}>🏆 CLASSEMENT</p>
+            <p className="text-xs" style={{ color: TEXT }}>Les meilleurs dev</p>
           </button>
         </div>
 
@@ -5796,7 +5933,12 @@ export default function FullstackQuest() {
   // session, non persisté). On n'entre dans le jeu — et donc dans le gate défi —
   // qu'en la quittant volontairement. Profil public : identifiant ciblé par un
   // lien #profile/<id> (consultable sans compte, hors accueil/gate).
-  const [entered, setEntered] = useState(false);
+  // Persisté en sessionStorage : un rafraîchissement garde le joueur dans l'app
+  // (ne le renvoie pas à l'accueil) ; un nouvel onglet/une nouvelle session
+  // repart de l'accueil, qui reste la porte d'entrée.
+  const [entered, setEntered] = useState(() => {
+    try { return sessionStorage.getItem("fsq-entered") === "1"; } catch { return false; }
+  });
   const [profileUserId, setProfileUserId] = useState("");
 
   // SRS Spaced Repetition
@@ -5922,7 +6064,10 @@ export default function FullstackQuest() {
     return () => window.removeEventListener("hashchange", applyHash);
   }, []);
 
-  function enterGame() { setEntered(true); }
+  function enterGame() {
+    try { sessionStorage.setItem("fsq-entered", "1"); } catch { /* ignore */ }
+    setEntered(true);
+  }
 
   function openProfile(userId) {
     setProfileUserId(userId);
@@ -6268,12 +6413,12 @@ export default function FullstackQuest() {
       setAda("Tu as déjà relevé le défi d'aujourd'hui! Reviens demain.", "idle");
       return;
     }
-    // Une question tirée d'un secteur réservé au pass devient une carte
-    // d'invitation à l'abonnement (non jouable, hors score) — voir DailyView.
-    const run = generateDailyRun(dailySeed, MODULES).map((item) => ({
-      ...item,
-      locked: ADVANCED_TIER.includes(item.moduleId) && !hasPass,
-    }));
+    // Secteur avancé = hors classement pour tous : carte d'abonnement (sans pass)
+    // ou bonus jouable non noté (avec pass). Seule la fondation est classée.
+    const run = generateDailyRun(dailySeed, MODULES).map((item) => {
+      const advanced = ADVANCED_TIER.includes(item.moduleId);
+      return { ...item, advanced, locked: advanced && !hasPass };
+    });
     setDailyRun(run);
     setDailyQIdx(0);
     setDailyScore(0);
@@ -6292,15 +6437,17 @@ export default function FullstackQuest() {
     }
   }
 
-  // answers: [{ moduleId, prompt, selected }] pour les questions RÉELLEMENT
-  // jouées (hors cartes d'abonnement). On n'envoie jamais de score : le serveur
-  // corrige lui-même (voir contentHash / POST /daily/submit). Intégrité du
-  // classement : un client ne peut pas s'auto-attribuer un score.
+  // answers: [{ moduleId, prompt, selected, reasoning? }] pour les questions
+  // RÉELLEMENT jouées (hors cartes d'abonnement). On n'envoie jamais de score :
+  // le serveur corrige lui-même (voir contentHash / POST /daily/submit).
+  // Intégrité du classement : un client ne peut pas s'auto-attribuer un score.
+  // `reasoning` (Phase 6) est une collecte pure, ignorée par le calcul de score.
   async function submitDailyResult(ref, answers) {
     if (!authToken) return; // invité : joué localement, hors classement
     const graded = await Promise.all((answers || []).map(async (a) => ({
       hash: await contentHash(a.moduleId, "qcm", a.prompt),
       selected: a.selected,
+      reasoning: a.reasoning,
     })));
     const payload = { reference: ref, answers: graded, durationMs: dailyStartMs ? Date.now() - dailyStartMs : 0 };
     const ok = await postDaily(payload);
@@ -6374,15 +6521,39 @@ export default function FullstackQuest() {
     const total = qualRun?.length || 1;
     const pct = Math.round((qualScore / total) * 100);
     const passed = pct >= QUALIFICATION_PASS_PCT;
+    const qualified = passed || !!profile.qualification?.passed;
+    const earned = new Set(profile.badges || []);
+    if (checkCurriculumComplete(qualified, earned)) earned.add("curriculum_complete");
     persist({
       ...profile,
+      badges: [...earned],
       qualification: {
-        passed: passed || !!profile.qualification?.passed,
+        passed: qualified,
         bestScore: Math.max(profile.qualification?.bestScore || 0, pct),
         attempts: (profile.qualification?.attempts || 0) + 1,
       },
     });
     return { pct, passed };
+  }
+
+  // Maîtrise par concept (Phase 5) : purement additif, ne change aucun score
+  // déjà affiché ailleurs — juste un compteur seen/correct par concept tagué
+  // (VALID_CONCEPTS côté serveur). Sans effet si la question n'a pas de tag,
+  // donc sans risque pour les questions existantes non taguées.
+  function recordConceptAnswer(q, correct) {
+    const concept = q?.concept;
+    if (!concept) return;
+    const cur = profile.skills?.conceptMastery?.[concept] || { seen: 0, correct: 0 };
+    persist({
+      ...profile,
+      skills: {
+        ...(profile.skills || {}),
+        conceptMastery: {
+          ...(profile.skills?.conceptMastery || {}),
+          [concept]: { seen: cur.seen + 1, correct: cur.correct + (correct ? 1 : 0) },
+        },
+      },
+    });
   }
 
   // Épreuve Technique : exercice code/débogage d'un secteur, débloqué séparément.
@@ -6410,6 +6581,7 @@ export default function FullstackQuest() {
       const earned = new Set(profile.badges || []);
       const allDone = MODULES.every((m) => nextTechnical[m.id]?.passed);
       if (allDone) earned.add("technical_master");
+      if (checkCurriculumComplete(!!profile.qualification?.passed, earned)) earned.add("curriculum_complete");
       persist({ ...profile, xp: profile.xp + 40, badges: [...earned], technical: nextTechnical });
     }
   }
@@ -6456,6 +6628,7 @@ export default function FullstackQuest() {
     const q = getBattleQuestions(MODULES[activeIdx])[qIdx];
     setSelected(i);
     setAnswered(true);
+    recordConceptAnswer(q, i === q.correct);
     if (i === q.correct) landHit(); else hurt();
   }
 
@@ -6594,6 +6767,7 @@ export default function FullstackQuest() {
         xpGain += 150;
       }
     }
+    if (checkCurriculumComplete(!!profile.qualification?.passed, earned)) earned.add("curriculum_complete");
 
     persist({
       ...profile,
@@ -6755,6 +6929,7 @@ export default function FullstackQuest() {
   // render depuis le profil courant. Le dispatcher traduit l'action
   // sérialisable d'une étape en navigation concrète.
   const parcours = computeParcours(profile, hasPass);
+  const horizon = computeHorizon(profile);
   function runParcoursAction(action) {
     if (!action) return;
     switch (action.type) {
@@ -6781,12 +6956,12 @@ export default function FullstackQuest() {
     aiHint, aiBusy, aiError, askLocalHint, clearAiHint,
     review, askCodeReview, resubmitForReview, recordChantierReview,
     levelInfo, completedCount, badgeCount, nextIdx, adaGreet,
-    parcours, runParcoursAction,
+    parcours, runParcoursAction, horizon,
     isUnlocked, startModule, engage, backToMap, resetProgress,
     selectAnswer, runTests, moveLine, validateOrder, nextQuestion,
     dailyRun, dailyQIdx, setDailyQIdx, dailyScore, setDailyScore, startDailyChallenge, submitDailyResult,
     srsSessionItems, srsSessionIdx, setSrsSessionIdx, startSrsSession, persist,
-    toggleMilestone,
+    toggleMilestone, recordConceptAnswer,
     qualRun, qualQIdx, setQualQIdx, qualScore, setQualScore, startQualificationExam, finishQualificationExam,
     techCodeInput, setTechCodeInput, techResults, startTechnicalTrial, runTechnicalTests,
     authToken, authUser, access, hasPass, accountAuth, accountLogout, accountSyncNow, refreshMe,
@@ -6806,6 +6981,7 @@ export default function FullstackQuest() {
 
   // Profil public et console admin : accès par lien direct, hors accueil/gate.
   if (view === "profile") return <><ProfileView ctx={ctx} />{chrome}</>;
+  if (view === "leaderboard") return <><LeaderboardView ctx={ctx} />{chrome}</>;
   if (view === "admin") return <>{adminKey ? <AdminView ctx={ctx} /> : <AdminGateView ctx={ctx} />}{chrome}</>;
 
   // Accueil : porte d'entrée, à chaque arrivée. Le Défi ne s'intercale qu'ensuite,

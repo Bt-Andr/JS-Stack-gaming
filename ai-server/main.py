@@ -324,6 +324,29 @@ VALID_MODULES = {"js-fond", "js-avance", "async", "ts", "react", "next", "expres
 VALID_QTYPES = {"qcm", "code", "order", "refactor"}
 VALID_STATUSES = {"active", "disabled"}
 
+# Tag de concept optionnel, plus fin que moduleId — vocabulaire fermé (comme
+# REVIEW_AXES) plutôt que texte libre, pour rester agrégeable. Nullable : les
+# questions sans tag restent valides, le taggage est progressif, pas un
+# préalable. Liste amenée à grandir au fil de l'écriture des questions.
+VALID_CONCEPTS = {
+    # js-fond
+    "variables", "types", "fonctions", "tableaux", "objets", "boucles", "conditions",
+    # js-avance
+    "closures", "prototypes", "destructuring", "spread-rest", "modules-es6", "this",
+    # async
+    "callbacks", "promises", "async-await", "event-loop", "fetch",
+    # ts
+    "types-ts", "interfaces", "generiques",
+    # react
+    "composants", "props", "state", "hooks", "effets",
+    # next
+    "routing", "ssr-ssg", "api-routes",
+    # express
+    "routes-express", "middlewares", "rest",
+    # vite
+    "build", "env-vite",
+}
+
 # Le schéma (questions + comptes + paiements) et le pool vivent dans core.py.
 _get_pool = core.get_pool
 _require_db = core.require_db
@@ -343,6 +366,7 @@ class QuestionIn(BaseModel):
     technical: bool = False
     prompt: str = ""
     explain: Optional[str] = None
+    concept: Optional[str] = None       # sous-concept, vocabulaire fermé (VALID_CONCEPTS)
     code: Optional[str] = None          # extrait de code affiché (QCM)
     options: Optional[list] = None      # qcm
     correct: Optional[int] = None       # qcm
@@ -367,6 +391,11 @@ def _validate_question(q: QuestionIn) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"prompt": prompt}
     if q.explain and q.explain.strip():
         payload["explain"] = q.explain.strip()
+    if q.concept and q.concept.strip():
+        concept = q.concept.strip()
+        if concept not in VALID_CONCEPTS:
+            bad(f"concept invalide: {concept!r} (attendu: {', '.join(sorted(VALID_CONCEPTS))})")
+        payload["concept"] = concept
 
     if q.qtype == "qcm":
         options = [str(o).strip() for o in (q.options or [])]

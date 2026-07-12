@@ -1,6 +1,6 @@
 import React from "react";
 import {
-  Heart, Loader2, Flame, Swords, Shield, Trophy, Star, Crown, Hammer, Wrench,
+  Heart, Loader2, Flame, Swords, Shield, Trophy, Star, Crown, Hammer, Wrench, GraduationCap,
 } from "lucide-react";
 
 export const BG = "#0B2545";
@@ -43,6 +43,7 @@ export const BADGES = {
   guardian:      { Icon: Crown, label: "Gardien de la Stack", desc: "Terrasser OVERFLOW et sauver la Stack." },
   chantier_done: { Icon: Hammer, label: "Chantier Livré", desc: "Terminer les 14 jalons du Chantier Fullstack — un vrai projet construit de tes mains." },
   technical_master: { Icon: Wrench, label: "Certifié Technique", desc: "Réussir l'Épreuve Technique des 9 secteurs." },
+  curriculum_complete: { Icon: GraduationCap, label: "Parcours Terminé", desc: "Qualification, 9 Épreuves Techniques et Chantier — le curriculum complet, bouclé." },
 };
 
 export const ADA_LINES = {
