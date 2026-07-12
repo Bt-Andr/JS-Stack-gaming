@@ -58,6 +58,8 @@ TAGS = [
     ("js-avance", "qcm", "Avec \"type\": \"module\" dans package.json, quel système de modules Node.js utilise-t-il par défaut ?", "modules-es6"),
     ("js-avance", "qcm", "Quelle est la vraie différence entre une copie \"shallow\" (superficielle) et \"deep\" (profonde) d'un objet ?", "spread-rest"),
     ("js-avance", "code", "Écris une fonction pairs(arr) qui renvoie un NOUVEAU tableau avec uniquement les nombres pairs.", "tableaux"),
+    ("js-avance", "qcm", "À quoi sert Array.prototype.reduce ?", "reduce"),
+    ("js-avance", "qcm", "Que fait l'optional chaining ( ?. ), par exemple dans user?.address?.city ?", "optional-chaining"),
 
     # async
     ("async", "qcm", "Quelle est la vraie différence entre un callback et une Promise ?", "promises"),

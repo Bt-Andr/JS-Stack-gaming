@@ -333,6 +333,7 @@ VALID_CONCEPTS = {
     "variables", "types", "fonctions", "tableaux", "objets", "boucles", "conditions",
     # js-avance
     "closures", "prototypes", "destructuring", "spread-rest", "modules-es6", "this",
+    "reduce", "optional-chaining",
     # async
     "callbacks", "promises", "async-await", "event-loop", "fetch",
     # ts

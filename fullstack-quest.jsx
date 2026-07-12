@@ -121,6 +121,20 @@ const MODULES = [
         explain: "map() transforme chaque élément et retourne un nouveau tableau de même taille. forEach ne retourne rien, filter peut réduire la taille, et reduce accumule une seule valeur."
       },
       {
+        concept: "tableaux",
+        prompt: "Quelle méthode de tableau retire le DERNIER élément et le renvoie, en modifiant le tableau original ?",
+        options: ["pop", "shift", "slice", "splice(0,1)"],
+        correct: 0,
+        explain: "pop() retire et renvoie le dernier élément, en modifiant le tableau en place (mutation). shift() fait la même chose mais sur le PREMIER élément. slice() ne modifie rien (copie). splice(0,1) retire le premier élément, pas le dernier."
+      },
+      {
+        concept: "tableaux",
+        prompt: "Quelle méthode de tableau vérifie si AU MOINS UN élément satisfait une condition, et renvoie un booléen ?",
+        options: ["every", "some", "find", "includes"],
+        correct: 1,
+        explain: "some() renvoie true dès qu'un élément satisfait le test. every() exige que TOUS les éléments le satisfassent. find() renvoie l'élément lui-même (ou undefined), pas un booléen. includes() teste une valeur précise, pas une condition."
+      },
+      {
         type: "code",
         technical: true,
         concept: "fonctions",
@@ -173,6 +187,32 @@ const MODULES = [
         explain: "Le destructuring permet de définir une valeur par défaut (b = 10). Comme l'objet source ne contient pas de propriété b, c'est la valeur par défaut qui est utilisée."
       },
       {
+        concept: "destructuring",
+        prompt: "Comment extraire les propriétés nom et age d'un objet utilisateur, en les renommant respectivement n et a ?",
+        options: [
+          "const { nom: n, age: a } = utilisateur;",
+          "const { n: nom, a: age } = utilisateur;",
+          "const [n, a] = utilisateur;",
+          "const utilisateur.nom as n, utilisateur.age as a;"
+        ],
+        correct: 0,
+        explain: "Le renommage en destructuring d'objet se fait avec propriétéOriginale: nouveauNom. { nom: n } lit la propriété nom et la stocke dans une variable n."
+      },
+      {
+        concept: "destructuring",
+        code: `const [premier, ...reste] = [1, 2, 3, 4];`,
+        prompt: "Que valent premier et reste après cette ligne ?",
+        options: [
+          "premier vaut 1, reste vaut [2, 3, 4]",
+          "premier vaut [1], reste vaut 2",
+          "Erreur de syntaxe",
+          "premier et reste valent tous les deux [1, 2, 3, 4]"
+        ],
+        correct: 0,
+        explain: "Le destructuring de tableau associe positionnellement : premier capture le premier élément (1), et ...reste (rest pattern) capture tout ce qui suit dans un nouveau tableau ([2, 3, 4])."
+      },
+      {
+        concept: "reduce",
         prompt: "À quoi sert Array.prototype.reduce ?",
         options: [
           "Filtrer les éléments d'un tableau",
@@ -184,12 +224,58 @@ const MODULES = [
         explain: "reduce() parcourt le tableau en accumulant un résultat unique à chaque étape (somme, objet, chaîne...), à partir d'une fonction (accumulateur, élément) et d'une valeur initiale."
       },
       {
+        concept: "reduce",
+        code: `const total = [1, 2, 3, 4].reduce((acc, n) => acc + n, 0);`,
+        prompt: "Que vaut total après ce reduce ?",
+        options: ["10", "[1,2,3,4]", "0", "NaN"],
+        correct: 0,
+        explain: "reduce parcourt le tableau en accumulant : acc démarre à 0 (la valeur initiale), puis reçoit successivement chaque élément ajouté (0+1=1, 1+2=3, 3+3=6, 6+4=10). Le résultat final est 10."
+      },
+      {
+        concept: "reduce",
+        code: `const counts = ["a", "b", "a", "c", "b", "a"].reduce((acc, mot) => {\n  acc[mot] = (acc[mot] || 0) + 1;\n  return acc;\n}, {});`,
+        prompt: "Que permet ce reduce, au-delà de simplement additionner des nombres ?",
+        options: [
+          "Rien, reduce ne fonctionne qu'avec des nombres",
+          "Accumuler dans une structure quelconque (ici un objet de comptage) — la valeur initiale et le type accumulé peuvent être n'importe quoi, pas seulement un nombre",
+          "Trier le tableau par ordre alphabétique",
+          "C'est une erreur : reduce doit toujours renvoyer un tableau"
+        ],
+        correct: 1,
+        explain: "L'accumulateur de reduce peut être de n'importe quel type — ici un objet — ce qui permet de construire des structures complexes (comptage, regroupement, transformation) en un seul passage, pas seulement des sommes numériques."
+      },
+      {
         concept: "closures",
         code: `function compteur() {\n  let n = 0;\n  return () => ++n;\n}\nconst c = compteur();\nconsole.log(c(), c(), c());`,
         prompt: "Qu'affiche ce code ?",
         options: ["0 0 0", "1 1 1", "1 2 3", "undefined undefined undefined"],
         correct: 2,
         explain: "C'est une closure : la fonction interne \"se souvient\" de la variable n de son environnement parent, même après que compteur() ait fini de s'exécuter. Chaque appel à c() incrémente ce n persistant."
+      },
+      {
+        concept: "closures",
+        code: `for (var i = 0; i < 3; i++) {\n  setTimeout(() => console.log(i), 0);\n}`,
+        prompt: "Pourquoi ce code affiche-t-il 3, 3, 3 plutôt que 0, 1, 2 ?",
+        options: [
+          "setTimeout ne fonctionne pas avec les boucles",
+          "var n'a pas de portée de bloc : les trois callbacks partagent la MÊME variable i, qui vaut 3 à la fin de la boucle",
+          "console.log est asynchrone",
+          "C'est un bug du moteur JavaScript"
+        ],
+        correct: 1,
+        explain: "var ignore les blocs et n'a qu'UNE seule instance de i pour toute la boucle. Les trois closures capturent cette même variable, lue seulement quand setTimeout s'exécute (après la boucle), où i vaut déjà 3. Remplacer var par let créerait une nouvelle i à chaque itération, capturée séparément par chaque closure."
+      },
+      {
+        concept: "closures",
+        prompt: "À quoi sert une closure pour créer des données \"privées\" en JavaScript ?",
+        options: [
+          "Une closure ne peut pas créer de données privées",
+          "Une fonction interne garde accès aux variables de sa fonction englobante même après que celle-ci ait fini de s'exécuter, sans les exposer directement à l'extérieur",
+          "Il faut obligatoirement une classe avec des champs private",
+          "Les closures sont automatiquement en lecture seule"
+        ],
+        correct: 1,
+        explain: "Une variable déclarée dans une fonction n'est accessible que par les fonctions définies à l'intérieur (via la closure). Rien à l'extérieur ne peut y accéder directement — c'est le mécanisme le plus ancien d'encapsulation en JavaScript, avant même les champs privés des classes (#champ)."
       },
       {
         concept: "this",
@@ -204,11 +290,56 @@ const MODULES = [
         explain: "Les arrow functions n'ont pas leur propre this : elles utilisent celui de leur environnement de définition. C'est différent d'une fonction classique, dont le this dépend de la façon dont elle est appelée."
       },
       {
+        concept: "this",
+        code: `const obj = {\n  nom: "Ada",\n  saluer: function() {\n    console.log(this.nom);\n  }\n};\nconst fn = obj.saluer;\nfn();`,
+        prompt: "Que va afficher ce code ?",
+        options: [
+          "\"Ada\"",
+          "undefined (ou une erreur en mode strict)",
+          "null",
+          "\"this\""
+        ],
+        correct: 1,
+        explain: "this dépend de la façon dont une fonction est APPELÉE, pas de l'endroit où elle est définie. En extrayant saluer dans fn puis en l'appelant seule (fn()), this n'est plus lié à obj — il vaut undefined en mode strict (ou l'objet global sinon), donc this.nom échoue."
+      },
+      {
+        concept: "this",
+        prompt: "Quelle méthode permet d'appeler une fonction en imposant explicitement la valeur de this, en passant les arguments un par un ?",
+        options: ["Function.prototype.bind", "Function.prototype.call", "Function.prototype.apply", "Function.prototype.this"],
+        correct: 1,
+        explain: "call(contexte, arg1, arg2, ...) appelle immédiatement la fonction avec this = contexte et les arguments listés un par un. apply fait la même chose mais attend un TABLEAU d'arguments. bind ne l'appelle pas immédiatement : il renvoie une nouvelle fonction liée."
+      },
+      {
         concept: "modules-es6",
         prompt: "Avec \"type\": \"module\" dans package.json, quel système de modules Node.js utilise-t-il par défaut ?",
         options: ["CommonJS (require/module.exports)", "ES Modules (import/export)", "AMD", "UMD"],
         correct: 1,
         explain: "C'est le système ES Modules natif, basé sur les mots-clés import et export, qui devient le standard moderne — par opposition à l'ancien CommonJS (require/module.exports)."
+      },
+      {
+        concept: "modules-es6",
+        code: `// utils.js\nexport function double(x) { return x * 2; }\nexport default function triple(x) { return x * 3; }`,
+        prompt: "Comment importer à la fois l'export par défaut (triple) et l'export nommé (double) depuis utils.js ?",
+        options: [
+          "import triple, { double } from './utils.js';",
+          "import { triple, double } from './utils.js';",
+          "import * as triple, double from './utils.js';",
+          "import default triple, named double from './utils.js';"
+        ],
+        correct: 0,
+        explain: "L'export par défaut s'importe sans accolades et peut être nommé librement (triple), tandis que les exports nommés s'importent entre accolades avec leur nom exact ({ double }). Les deux peuvent se combiner sur une seule ligne."
+      },
+      {
+        concept: "modules-es6",
+        prompt: "Quelle est la vraie différence entre export default et export (nommé) ?",
+        options: [
+          "Un fichier ne peut avoir qu'UN SEUL export default, mais PLUSIEURS exports nommés",
+          "export default est plus rapide à l'exécution",
+          "Un export nommé ne peut être utilisé qu'une fois dans tout le projet",
+          "Aucune différence, ce sont des synonymes"
+        ],
+        correct: 0,
+        explain: "Un module ne peut déclarer qu'un seul export default (l'export \"principal\" du fichier), mais autant d'exports nommés que nécessaire. C'est une distinction structurelle, pas une question de performance."
       },
       {
         concept: "spread-rest",
@@ -223,6 +354,7 @@ const MODULES = [
         explain: "Une copie superficielle (via spread ou Object.assign par exemple) duplique le premier niveau de propriétés, mais les objets/tableaux imbriqués restent les mêmes références. Une copie profonde duplique tout, à chaque niveau."
       },
       {
+        concept: "optional-chaining",
         prompt: "Que fait l'optional chaining ( ?. ), par exemple dans user?.address?.city ?",
         options: [
           "Il lance une erreur si une propriété intermédiaire est absente",
@@ -232,6 +364,32 @@ const MODULES = [
         ],
         correct: 1,
         explain: "L'optional chaining permet de \"descendre\" dans une chaîne de propriétés en toute sécurité : si user ou user.address est null/undefined, l'expression s'arrête et renvoie undefined plutôt que de lever une erreur."
+      },
+      {
+        concept: "optional-chaining",
+        code: `const ville = utilisateur?.adresse?.ville ?? "Inconnue";`,
+        prompt: "Que se passe-t-il si utilisateur.adresse est undefined ?",
+        options: [
+          "Une erreur est levée (Cannot read property 'ville' of undefined)",
+          "L'expression s'arrête à ce niveau et ville vaut undefined, puis ?? remplace cette valeur par \"Inconnue\"",
+          "ville vaut automatiquement une chaîne vide",
+          "Le programme plante silencieusement"
+        ],
+        correct: 1,
+        explain: "?. court-circuite dès qu'une référence intermédiaire est null/undefined, sans lever d'erreur — l'expression entière vaut alors undefined. L'opérateur ?? (nullish coalescing) prend ensuite le relais pour fournir \"Inconnue\" comme valeur de repli."
+      },
+      {
+        concept: "optional-chaining",
+        code: `utilisateur?.envoyerMessage?.("Salut");`,
+        prompt: "À quoi sert le ?. juste avant les parenthèses d'appel, dans envoyerMessage?.(\"Salut\") ?",
+        options: [
+          "C'est une erreur de syntaxe",
+          "Il appelle la méthode seulement si envoyerMessage existe réellement (n'est ni null ni undefined) ; sinon l'expression entière vaut undefined sans planter",
+          "Il force l'appel même si la méthode n'existe pas",
+          "Il transforme la méthode en Promise"
+        ],
+        correct: 1,
+        explain: "L'optional chaining s'applique aussi aux appels de fonction : ?.() n'exécute l'appel que si la référence avant n'est pas null/undefined. Utile quand une méthode n'est définie que conditionnellement (callback optionnel, API partiellement implémentée...)."
       },
       {
         type: "refactor",
@@ -307,6 +465,47 @@ const MODULES = [
         options: ["1, 2, 3", "1, 3, 2", "3, 1, 2", "2, 3, 1"],
         correct: 1,
         explain: "Le code synchrone de f() s'exécute immédiatement (affiche 1), puis await met la suite en file d'attente (microtask) et rend la main : console.log(3) s'exécute, et seulement après, la suite de f() reprend (affiche 2)."
+      },
+      {
+        concept: "event-loop",
+        code: `console.log("A");\nsetTimeout(() => console.log("B"), 0);\nPromise.resolve().then(() => console.log("C"));\nconsole.log("D");`,
+        prompt: "Dans quel ordre ces lettres s'affichent-elles ?",
+        options: ["A, B, C, D", "A, D, C, B", "A, D, B, C", "A, C, D, B"],
+        correct: 1,
+        explain: "Le code synchrone passe en premier (A, D). Ensuite, les microtasks (Promise.then) passent AVANT les macrotasks (setTimeout), même avec un délai de 0 : donc C, puis B."
+      },
+      {
+        concept: "event-loop",
+        prompt: "Pourquoi dit-on que JavaScript est \"single-threaded\" mais peut quand même gérer des opérations asynchrones (réseau, timers) sans bloquer ?",
+        options: [
+          "JavaScript crée en réalité des threads cachés pour chaque opération asynchrone",
+          "Le moteur JS délègue les opérations longues (réseau, timers) à l'environnement (navigateur/Node), qui prévient la file d'attente (event loop) une fois le résultat prêt, sans bloquer le thread principal entre-temps",
+          "Ce n'est vrai qu'en théorie, en pratique JavaScript utilise plusieurs threads",
+          "Les opérations asynchrones sont en réalité synchrones mais très rapides"
+        ],
+        correct: 1,
+        explain: "Le thread principal de JS reste unique, mais l'environnement d'exécution (Web APIs du navigateur, ou libuv sous Node) gère les opérations longues séparément. Une fois terminées, elles sont placées dans une file (queue), que l'event loop traite dès que le thread principal est libre — d'où l'illusion de parallélisme sans vrais threads JS."
+      },
+      {
+        concept: "async-await",
+        code: `async function chercherUtilisateur(id) {\n  try {\n    const res = await fetch(\`/api/users/\${id}\`);\n    if (!res.ok) throw new Error("Utilisateur introuvable");\n    return await res.json();\n  } catch (e) {\n    console.error(e.message);\n    return null;\n  }\n}`,
+        prompt: "Pourquoi entoure-t-on ce code de try/catch plutôt que de laisser l'erreur remonter ?",
+        options: [
+          "try/catch est obligatoire avec async/await, sinon erreur de syntaxe",
+          "Une Promise rejetée (réseau en échec, ou le throw manuel) devient une exception que await propage — sans try/catch, l'appelant devrait gérer un rejet non prévu",
+          "try/catch rend le code plus rapide",
+          "Ça n'a aucun effet, c'est juste une convention de style"
+        ],
+        correct: 1,
+        explain: "await transforme le rejet d'une Promise en exception JavaScript classique. Sans try/catch, cette exception remonterait telle quelle à l'appelant (ou provoquerait une Unhandled Promise Rejection) au lieu d'être gérée proprement ici, où le contexte pour réagir est le plus clair."
+      },
+      {
+        concept: "async-await",
+        code: `async function f() { return 5; }`,
+        prompt: "Que renvoie réellement l'appel f() ?",
+        options: ["Le nombre 5 directement", "Une Promise qui se résout avec 5", "undefined", "Une erreur, il manque un await"],
+        correct: 1,
+        explain: "Une fonction async renvoie TOUJOURS une Promise, même si son corps fait un return simple. return 5 équivaut à return Promise.resolve(5) du point de vue de l'appelant : il faut await f() (ou .then()) pour récupérer 5."
       },
       {
         concept: "promises",
@@ -461,6 +660,32 @@ const MODULES = [
         explain: "Un generic comme <T> est un \"paramètre de type\" : il permet d'écrire une fonction réutilisable pour n'importe quel type, tout en conservant la relation entre les types (ici, le type retourné est toujours identique au type reçu)."
       },
       {
+        concept: "generiques",
+        code: `function premier<T>(arr: T[]): T | undefined {\n  return arr[0];\n}`,
+        prompt: "Pourquoi le type de retour est-il T | undefined plutôt que juste T ?",
+        options: [
+          "C'est une erreur, ça devrait être juste T",
+          "Parce qu'un tableau peut être vide : arr[0] vaudrait alors undefined, et le type doit refléter ce cas réel",
+          "undefined est ajouté automatiquement à tous les types génériques",
+          "Pour forcer l'appelant à toujours fournir une valeur par défaut"
+        ],
+        correct: 1,
+        explain: "Un tableau vide existe (arr.length === 0), et dans ce cas arr[0] vaut undefined à l'exécution. Le type T | undefined documente honnêtement ce cas limite, plutôt que de prétendre qu'un élément est toujours présent."
+      },
+      {
+        concept: "generiques",
+        code: `function plusLong<T extends { length: number }>(a: T, b: T): T {\n  return a.length >= b.length ? a : b;\n}`,
+        prompt: "Que permet la contrainte extends { length: number } sur ce generic ?",
+        options: [
+          "Restreindre T à uniquement le type number",
+          "Autoriser T à être n'importe quel type POSSÉDANT une propriété length (chaînes, tableaux...), tout en gardant le type exact d'entrée/sortie",
+          "C'est une erreur de syntaxe, extends ne s'utilise que pour les classes",
+          "Forcer T à être un tableau uniquement"
+        ],
+        correct: 1,
+        explain: "extends sur un generic pose une borne : T peut être n'importe quel type compatible avec la forme { length: number } (chaînes, tableaux, objets custom avec length...), sans perdre la précision du type reçu — contrairement à un paramètre typé juste any ou { length: number } sans generic, qui perdrait cette précision."
+      },
+      {
         concept: "interfaces",
         code: `interface User {\n  name: string;\n  email?: string;\n}`,
         prompt: "Que signifie le ? après email dans cette interface ?",
@@ -566,6 +791,32 @@ const MODULES = [
         options: ["À chaque rendu", "Jamais", "Une seule fois, juste après le premier rendu (montage)", "Uniquement au démontage du composant"],
         correct: 2,
         explain: "Un tableau de dépendances vide [ ] signifie \"aucune dépendance ne change jamais\" : l'effet ne s'exécute donc qu'une seule fois, immédiatement après le premier rendu du composant (équivalent du montage)."
+      },
+      {
+        concept: "effets",
+        code: `useEffect(() => {\n  const id = setInterval(() => setCount(c => c + 1), 1000);\n  return () => clearInterval(id);\n}, []);`,
+        prompt: "À quoi sert la fonction renvoyée par ce useEffect ?",
+        options: [
+          "Elle ne sert à rien, c'est optionnel",
+          "C'est une fonction de nettoyage (cleanup) : React l'appelle avant de ré-exécuter l'effet, ou au démontage du composant, pour éviter les fuites (ici, arrêter l'interval)",
+          "Elle remplace le tableau de dépendances",
+          "Elle s'exécute avant l'effet lui-même, pas après"
+        ],
+        correct: 1,
+        explain: "Une fonction renvoyée par useEffect est sa fonction de nettoyage. React l'appelle automatiquement au démontage du composant (ou avant de relancer l'effet si les dépendances changent), ce qui évite ici qu'un setInterval continue de tourner après que le composant a disparu de l'écran."
+      },
+      {
+        concept: "effets",
+        code: `useEffect(() => {\n  console.log("effet");\n}, [userId]);`,
+        prompt: "Quand cet effet se ré-exécute-t-il ?",
+        options: [
+          "À chaque rendu, quoi qu'il arrive",
+          "Uniquement quand la valeur de userId change entre deux rendus",
+          "Jamais après le premier rendu",
+          "Uniquement quand le composant est redémonté"
+        ],
+        correct: 1,
+        explain: "Le tableau de dépendances [userId] dit à React de comparer la valeur de userId entre deux rendus : l'effet ne se ré-exécute QUE si elle a changé. C'est le comportement intermédiaire entre [] (jamais) et l'absence de tableau (à chaque rendu)."
       },
       {
         concept: "props",
@@ -2956,6 +3207,8 @@ const CONCEPT_TAGS = [
   { moduleId: "js-avance", qtype: "qcm", prompt: "Avec \"type\": \"module\" dans package.json, quel système de modules Node.js utilise-t-il par défaut ?", concept: "modules-es6" },
   { moduleId: "js-avance", qtype: "qcm", prompt: "Quelle est la vraie différence entre une copie \"shallow\" (superficielle) et \"deep\" (profonde) d'un objet ?", concept: "spread-rest" },
   { moduleId: "js-avance", qtype: "code", prompt: "Écris une fonction pairs(arr) qui renvoie un NOUVEAU tableau avec uniquement les nombres pairs.", concept: "tableaux" },
+  { moduleId: "js-avance", qtype: "qcm", prompt: "À quoi sert Array.prototype.reduce ?", concept: "reduce" },
+  { moduleId: "js-avance", qtype: "qcm", prompt: "Que fait l'optional chaining ( ?. ), par exemple dans user?.address?.city ?", concept: "optional-chaining" },
   // async
   { moduleId: "async", qtype: "qcm", prompt: "Quelle est la vraie différence entre un callback et une Promise ?", concept: "promises" },
   { moduleId: "async", qtype: "qcm", prompt: "Que fait précisément le mot-clé await ?", concept: "async-await" },
