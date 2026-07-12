@@ -58,18 +58,21 @@ const MODULES = [
     intro: "Avant de construire quoi que ce soit, il faut maîtriser le langage lui-même : variables, types, fonctions et portée. Ce module pose les bases indispensables à tout le reste du parcours.",
     questions: [
       {
+        concept: "variables",
         prompt: "Quel mot-clé déclare une variable qui ne peut pas être réaffectée ?",
         options: ["var", "let", "const", "static"],
         correct: 2,
         explain: "const empêche la réaffectation de la variable. Attention : un objet ou un tableau déclaré en const reste mutable (on peut modifier son contenu, juste pas réassigner la référence)."
       },
       {
+        concept: "types",
         prompt: "Que renvoie l'expression typeof null ?",
         options: ["\"null\"", "\"undefined\"", "\"object\"", "\"number\""],
         correct: 2,
         explain: "C'est une bizarrerie historique de JavaScript : typeof null vaut \"object\", même si null n'est pas vraiment un objet."
       },
       {
+        concept: "types",
         code: `console.log(1 + "1");\nconsole.log(1 + 1);`,
         prompt: "Que va afficher ce code, dans l'ordre ?",
         options: ["\"11\" puis 2", "2 puis \"11\"", "\"11\" puis \"11\"", "Erreur"],
@@ -77,6 +80,7 @@ const MODULES = [
         explain: "Avec l'opérateur +, dès qu'une chaîne est présente, JavaScript convertit l'autre valeur en chaîne (coercion) : 1 + \"1\" devient \"11\". Sans chaîne, c'est une addition classique : 1 + 1 = 2."
       },
       {
+        concept: "types",
         prompt: "Quelle est la vraie différence entre == et === ?",
         options: [
           "Aucune, ils sont strictement identiques",
@@ -88,12 +92,14 @@ const MODULES = [
         explain: "=== (égalité stricte) ne fait aucune conversion : les types doivent déjà correspondre. == tente de convertir les valeurs avant de comparer, ce qui peut produire des surprises (ex : \"5\" == 5 vaut true)."
       },
       {
+        concept: "variables",
         prompt: "Quelle portée (scope) a une variable déclarée avec let à l'intérieur d'un bloc { } ?",
         options: ["Portée globale", "Portée de fonction", "Portée de bloc", "Portée de module uniquement"],
         correct: 2,
         explain: "let (et const) sont limités au bloc { } dans lequel ils sont déclarés. C'est une différence majeure avec var, qui ignore les blocs et ne connaît que la portée de fonction."
       },
       {
+        concept: "fonctions",
         code: `function add(a, b) {\n  return a + b;\n}\nconsole.log(add(2));`,
         prompt: "Que va afficher ce code ?",
         options: ["2", "NaN", "undefined", "Une erreur"],
@@ -101,12 +107,14 @@ const MODULES = [
         explain: "Le second argument b n'est pas fourni, donc il vaut undefined. 2 + undefined produit NaN (Not a Number), car l'addition ne peut pas convertir undefined en nombre valide."
       },
       {
+        concept: "fonctions",
         prompt: "Quel type de fonction n'a pas son propre this (il hérite de celui du contexte englobant) ?",
         options: ["Une fonction classique (function)", "Une fonction fléchée (=>)", "Une méthode de classe", "Une fonction génératrice"],
         correct: 1,
         explain: "Les arrow functions ne créent pas leur propre this : elles capturent celui du contexte lexical où elles sont définies. C'est très utile dans les callbacks et les composants."
       },
       {
+        concept: "tableaux",
         prompt: "Quelle méthode de tableau applique une fonction à chaque élément et retourne un NOUVEAU tableau de même longueur ?",
         options: ["forEach", "map", "filter", "reduce"],
         correct: 1,
@@ -115,6 +123,7 @@ const MODULES = [
       {
         type: "code",
         technical: true,
+        concept: "fonctions",
         prompt: "Écris une fonction somme(a, b) qui renvoie la somme de deux nombres.",
         starter: "function somme(a, b) {\n  // ton code ici\n}",
         tests: [
@@ -144,6 +153,7 @@ const MODULES = [
     intro: "Le JavaScript moderne (ES6+) apporte des outils puissants — destructuring, spread, closures — qui rendent ton code plus court, plus lisible et plus fiable.",
     questions: [
       {
+        concept: "spread-rest",
         prompt: "Que fait l'opérateur spread dans [...arr1, ...arr2] ?",
         options: [
           "Il fusionne deux tableaux en copiant leurs éléments dans un nouveau tableau",
@@ -155,6 +165,7 @@ const MODULES = [
         explain: "L'opérateur ... \"étale\" les éléments d'un tableau (ou objet). Combiné avec [ ], il permet de construire un nouveau tableau qui contient une copie superficielle des éléments des tableaux d'origine."
       },
       {
+        concept: "destructuring",
         code: `const { a, b = 10 } = { a: 5 };\nconsole.log(b);`,
         prompt: "Que va afficher console.log(b) ?",
         options: ["undefined", "5", "10", "Erreur"],
@@ -173,6 +184,7 @@ const MODULES = [
         explain: "reduce() parcourt le tableau en accumulant un résultat unique à chaque étape (somme, objet, chaîne...), à partir d'une fonction (accumulateur, élément) et d'une valeur initiale."
       },
       {
+        concept: "closures",
         code: `function compteur() {\n  let n = 0;\n  return () => ++n;\n}\nconst c = compteur();\nconsole.log(c(), c(), c());`,
         prompt: "Qu'affiche ce code ?",
         options: ["0 0 0", "1 1 1", "1 2 3", "undefined undefined undefined"],
@@ -180,6 +192,7 @@ const MODULES = [
         explain: "C'est une closure : la fonction interne \"se souvient\" de la variable n de son environnement parent, même après que compteur() ait fini de s'exécuter. Chaque appel à c() incrémente ce n persistant."
       },
       {
+        concept: "this",
         prompt: "Dans une méthode d'objet, quelle est la valeur de this dans une fonction fléchée définie à l'intérieur ?",
         options: [
           "L'objet courant, toujours",
@@ -191,12 +204,14 @@ const MODULES = [
         explain: "Les arrow functions n'ont pas leur propre this : elles utilisent celui de leur environnement de définition. C'est différent d'une fonction classique, dont le this dépend de la façon dont elle est appelée."
       },
       {
+        concept: "modules-es6",
         prompt: "Avec \"type\": \"module\" dans package.json, quel système de modules Node.js utilise-t-il par défaut ?",
         options: ["CommonJS (require/module.exports)", "ES Modules (import/export)", "AMD", "UMD"],
         correct: 1,
         explain: "C'est le système ES Modules natif, basé sur les mots-clés import et export, qui devient le standard moderne — par opposition à l'ancien CommonJS (require/module.exports)."
       },
       {
+        concept: "spread-rest",
         prompt: "Quelle est la vraie différence entre une copie \"shallow\" (superficielle) et \"deep\" (profonde) d'un objet ?",
         options: [
           "Aucune différence concrète",
@@ -232,6 +247,7 @@ const MODULES = [
       {
         type: "code",
         technical: true,
+        concept: "tableaux",
         prompt: "Écris une fonction pairs(arr) qui renvoie un NOUVEAU tableau avec uniquement les nombres pairs.",
         starter: "function pairs(arr) {\n  // indice : utilise .filter\n}",
         tests: [
@@ -261,6 +277,7 @@ const MODULES = [
     intro: "Le web est asynchrone par nature : requêtes réseau, fichiers, timers. Maîtriser les Promises et async/await est indispensable pour tout développeur fullstack.",
     questions: [
       {
+        concept: "promises",
         prompt: "Quelle est la vraie différence entre un callback et une Promise ?",
         options: [
           "Aucune différence",
@@ -272,6 +289,7 @@ const MODULES = [
         explain: "Une Promise encapsule un résultat asynchrone dans un objet manipulable (.then/.catch ou async/await), ce qui évite le fameux \"callback hell\" des callbacks imbriqués les uns dans les autres."
       },
       {
+        concept: "async-await",
         prompt: "Que fait précisément le mot-clé await ?",
         options: [
           "Il transforme automatiquement une fonction normale en fonction async",
@@ -283,6 +301,7 @@ const MODULES = [
         explain: "await suspend uniquement la fonction async courante en attendant le résultat de la Promise — le reste du programme (et le thread principal) continue de fonctionner normalement pendant ce temps."
       },
       {
+        concept: "event-loop",
         code: `async function f() {\n  console.log(1);\n  await null;\n  console.log(2);\n}\nf();\nconsole.log(3);`,
         prompt: "Dans quel ordre ces nombres s'affichent-ils ?",
         options: ["1, 2, 3", "1, 3, 2", "3, 1, 2", "2, 3, 1"],
@@ -290,6 +309,7 @@ const MODULES = [
         explain: "Le code synchrone de f() s'exécute immédiatement (affiche 1), puis await met la suite en file d'attente (microtask) et rend la main : console.log(3) s'exécute, et seulement après, la suite de f() reprend (affiche 2)."
       },
       {
+        concept: "promises",
         prompt: "Que fait Promise.all([p1, p2, p3]) ?",
         options: [
           "Elle exécute les promesses en séquence, une par une",
@@ -301,6 +321,7 @@ const MODULES = [
         explain: "Promise.all lance toutes les promesses en parallèle et attend qu'elles soient toutes résolues. Si une seule échoue, Promise.all rejette immédiatement avec cette erreur."
       },
       {
+        concept: "promises",
         prompt: "Quelle est la différence entre Promise.all et Promise.allSettled ?",
         options: [
           "Aucune différence",
@@ -312,6 +333,7 @@ const MODULES = [
         explain: "Promise.allSettled ne s'arrête jamais en cas d'erreur : elle attend que toutes les promesses se terminent (résolues ou rejetées) et te donne le détail de chacune, ce qui est utile quand un échec partiel est acceptable."
       },
       {
+        concept: "fetch",
         prompt: "Que renvoie fetch(url) par défaut ?",
         options: [
           "Directement les données JSON",
@@ -323,6 +345,7 @@ const MODULES = [
         explain: "fetch renvoie une Promise<Response>. La Response contient les en-têtes, le statut, etc. Pour obtenir les données utilisables, il faut appeler une méthode comme response.json() ou response.text(), qui renvoie elle-même une Promise."
       },
       {
+        concept: "promises",
         prompt: "Que se passe-t-il si une Promise est rejetée sans aucun .catch ni try/catch ?",
         options: [
           "Rien, l'application continue normalement sans avertissement",
@@ -334,6 +357,7 @@ const MODULES = [
         explain: "JavaScript signale les rejets de Promise non gérés (Unhandled Promise Rejection), aussi bien dans le navigateur que sous Node.js. C'est pourquoi il faut toujours prévoir un .catch ou un try/catch autour d'un await."
       },
       {
+        concept: "promises",
         prompt: "Comment exécuter plusieurs appels asynchrones en parallèle plutôt qu'en série ?",
         options: [
           "Enchaîner plusieurs await l'un après l'autre",
@@ -346,6 +370,7 @@ const MODULES = [
       },
       {
         type: "order",
+        concept: "fetch",
         prompt: "Remets dans le bon ordre le corps d'une fonction async qui récupère puis renvoie des données JSON.",
         lines: [
           "const res = await fetch(url);",
@@ -357,6 +382,7 @@ const MODULES = [
       {
         type: "code",
         technical: true,
+        concept: "promises",
         prompt: "Ce code a un bug : doubleAsync(nums) doit renvoyer une Promise résolue avec les nombres doublés, mais elle renvoie un tableau de Promises non résolues. Corrige-la avec Promise.all.",
         starter: "async function doubleAsync(nums) {\n  // bug : on renvoie les promesses sans les attendre\n  return nums.map(n => Promise.resolve(n * 2));\n}",
         tests: [
@@ -386,6 +412,7 @@ const MODULES = [
     intro: "TypeScript ajoute une couche de types statiques au-dessus de JavaScript, pour détecter des erreurs avant même d'exécuter le code. C'est un standard dans les projets professionnels.",
     questions: [
       {
+        concept: "types-ts",
         prompt: "Quel est l'avantage principal de TypeScript par rapport à JavaScript pur ?",
         options: [
           "Il s'exécute plus vite dans le navigateur",
@@ -397,6 +424,7 @@ const MODULES = [
         explain: "TypeScript se compile (transpile) en JavaScript classique : il n'apporte aucun gain de performance runtime, mais il vérifie la cohérence des types pendant le développement, avant même d'exécuter quoi que ce soit."
       },
       {
+        concept: "types-ts",
         prompt: "Comment typer correctement une fonction qui prend un nombre et retourne une chaîne ?",
         options: [
           "function f(x): number => string",
@@ -408,6 +436,7 @@ const MODULES = [
         explain: "La syntaxe place le type du paramètre après les deux-points (x: number), et le type de retour après les parenthèses, avant les accolades : function f(x: number): string."
       },
       {
+        concept: "interfaces",
         prompt: "Parmi ces affirmations sur interface vs type en TypeScript, laquelle est correcte ?",
         options: [
           "Une interface peut être étendue par plusieurs déclarations (merging), ce qu'un type ne permet pas",
@@ -419,6 +448,7 @@ const MODULES = [
         explain: "Pour décrire la forme d'un objet simple, interface et type sont souvent interchangeables. Mais interface bénéficie du \"declaration merging\" (fusion automatique), tandis que type gère plus naturellement les unions (A | B) et les alias de primitifs."
       },
       {
+        concept: "generiques",
         code: `function identity<T>(x: T): T {\n  return x;\n}`,
         prompt: "Que permet ce \"generic\" <T> ?",
         options: [
@@ -431,6 +461,7 @@ const MODULES = [
         explain: "Un generic comme <T> est un \"paramètre de type\" : il permet d'écrire une fonction réutilisable pour n'importe quel type, tout en conservant la relation entre les types (ici, le type retourné est toujours identique au type reçu)."
       },
       {
+        concept: "interfaces",
         code: `interface User {\n  name: string;\n  email?: string;\n}`,
         prompt: "Que signifie le ? après email dans cette interface ?",
         options: ["La propriété est obligatoire", "La propriété est optionnelle", "La propriété est en lecture seule", "La propriété est un type union"],
@@ -438,12 +469,14 @@ const MODULES = [
         explain: "Le ? marque une propriété optionnelle : un objet User peut être valide avec ou sans la propriété email. Son type effectif devient alors string | undefined."
       },
       {
+        concept: "types-ts",
         prompt: "Comment représente-t-on en TypeScript \"soit une chaîne, soit un nombre\" ?",
         options: ["string & number", "string | number", "string + number", "[string, number]"],
         correct: 1,
         explain: "Le symbole | (pipe) crée un type union : string | number signifie que la valeur peut être l'un OU l'autre. Le & (intersection) signifierait au contraire qu'elle doit satisfaire les deux types à la fois."
       },
       {
+        concept: "types-ts",
         code: `const config = { mode: "dark" } as const;`,
         prompt: "À quoi sert as const ici ?",
         options: [
@@ -456,6 +489,7 @@ const MODULES = [
         explain: "as const verrouille le typage au niveau le plus précis : mode est typé comme le littéral \"dark\" (et non string), et les propriétés deviennent readonly. C'est très utile pour des constantes ou de la configuration."
       },
       {
+        concept: "types-ts",
         prompt: "Pourquoi préférer unknown à any quand on reçoit une donnée dont le type n'est pas garanti ?",
         options: [
           "Ils sont parfaitement identiques",
@@ -502,6 +536,7 @@ const MODULES = [
     intro: "React est la bibliothèque la plus utilisée pour construire des interfaces. Composants, state et hooks sont les briques de base de toute application moderne.",
     questions: [
       {
+        concept: "composants",
         prompt: "Qu'est-ce qu'un composant React, fondamentalement ?",
         options: [
           "Une feuille de style CSS",
@@ -513,6 +548,7 @@ const MODULES = [
         explain: "Un composant React est avant tout une fonction JavaScript qui prend des props en entrée et retourne du JSX (la description de ce qui doit s'afficher). React se charge de transformer ce JSX en éléments du DOM réel."
       },
       {
+        concept: "state",
         prompt: "Que fait le hook useState ?",
         options: [
           "Il exécute un effet de bord après le rendu",
@@ -524,6 +560,7 @@ const MODULES = [
         explain: "useState renvoie une paire [valeur, fonctionDeMiseÀJour]. Appeler cette fonction met à jour la valeur ET déclenche un nouveau rendu du composant pour refléter ce changement à l'écran."
       },
       {
+        concept: "effets",
         code: `useEffect(() => {\n  console.log("monté");\n}, []);`,
         prompt: "Quand ce useEffect s'exécute-t-il, avec un tableau de dépendances vide ?",
         options: ["À chaque rendu", "Jamais", "Une seule fois, juste après le premier rendu (montage)", "Uniquement au démontage du composant"],
@@ -531,6 +568,7 @@ const MODULES = [
         explain: "Un tableau de dépendances vide [ ] signifie \"aucune dépendance ne change jamais\" : l'effet ne s'exécute donc qu'une seule fois, immédiatement après le premier rendu du composant (équivalent du montage)."
       },
       {
+        concept: "props",
         prompt: "Quelle règle s'applique aux props reçues par un composant enfant ?",
         options: [
           "L'enfant peut les modifier directement",
@@ -542,6 +580,7 @@ const MODULES = [
         explain: "Les props descendent du parent vers l'enfant et sont en lecture seule : un composant enfant ne doit jamais modifier directement une prop reçue. Pour changer une donnée, il faut passer par le state (souvent géré par le parent)."
       },
       {
+        concept: "composants",
         code: `items.map(item => <li key={item.id}>{item.label}</li>)`,
         prompt: "Pourquoi utiliser une key unique sur chaque élément d'une liste ?",
         options: [
@@ -554,6 +593,7 @@ const MODULES = [
         explain: "La key donne à React une identité stable pour chaque élément de liste. Sans clé fiable (ou avec l'index comme clé sur une liste qui change d'ordre), React peut mal réconcilier le DOM et provoquer des bugs ou des pertes de performance."
       },
       {
+        concept: "hooks",
         prompt: "Que fait le hook useMemo ?",
         options: [
           "Il mémorise une valeur calculée et ne la recalcule que si ses dépendances changent",
@@ -565,6 +605,7 @@ const MODULES = [
         explain: "useMemo met en cache le résultat d'un calcul coûteux entre les rendus, et ne le recalcule que si une de ses dépendances change. C'est une optimisation de performance, à utiliser quand le calcul est réellement coûteux."
       },
       {
+        concept: "state",
         prompt: "Quelle est la différence entre un input \"contrôlé\" et \"non contrôlé\" en React ?",
         options: [
           "Aucune différence",
@@ -576,6 +617,7 @@ const MODULES = [
         explain: "Un input contrôlé synchronise sa valeur avec le state à chaque frappe (value={state}, onChange={...}), ce qui donne un contrôle total. Un input non contrôlé laisse le DOM gérer sa propre valeur, qu'on récupère ponctuellement via une ref."
       },
       {
+        concept: "props",
         prompt: "À quoi sert le Context API de React ?",
         options: [
           "Gérer le CSS global de l'application",
@@ -588,6 +630,7 @@ const MODULES = [
       },
       {
         type: "order",
+        concept: "state",
         prompt: "Remets dans l'ordre les lignes d'un composant React à compteur.",
         lines: [
           "function Compteur() {",
@@ -600,6 +643,7 @@ const MODULES = [
       {
         type: "code",
         technical: true,
+        concept: "hooks",
         prompt: "Ce reducer de compteur a un bug : \"reset\" ne remet pas le compteur à zéro. Corrige counterReducer(state, action).",
         starter: "function counterReducer(state, action) {\n  switch (action.type) {\n    case \"increment\": return { count: state.count + 1 };\n    case \"decrement\": return { count: state.count - 1 };\n    case \"reset\": return state; // bug ici\n    default: return state;\n  }\n}",
         tests: [
@@ -629,6 +673,7 @@ const MODULES = [
     intro: "Next.js transforme React en framework fullstack complet : routage par fichiers, rendu serveur et API intégrées. C'est l'outil de référence pour des apps React en production.",
     questions: [
       {
+        concept: "ssr-ssg",
         prompt: "Quel est l'avantage principal de Next.js par rapport à une app React \"classique\" (créée avec Vite seul) ?",
         options: [
           "Il ne sert qu'à faire des sites purement statiques",
@@ -640,6 +685,7 @@ const MODULES = [
         explain: "Next.js ajoute au-dessus de React tout ce qu'il faut pour une vraie app de production : différentes stratégies de rendu (serveur, statique, client), un routage basé sur la structure de fichiers, et des endpoints d'API intégrés."
       },
       {
+        concept: "routing",
         prompt: "Dans l'App Router (dossier app/), comment crée-t-on une nouvelle route /blog ?",
         options: [
           "En créant un fichier blog.js à la racine du projet",
@@ -651,6 +697,7 @@ const MODULES = [
         explain: "L'App Router associe chaque route à un dossier dans app/ contenant un fichier page.tsx (ou .jsx). Le chemin du dossier (app/blog/) détermine directement l'URL (/blog)."
       },
       {
+        concept: "ssr-ssg",
         prompt: "Quelle est la vraie différence entre un Server Component et un Client Component dans l'App Router ?",
         options: [
           "Aucune différence",
@@ -662,6 +709,7 @@ const MODULES = [
         explain: "Par défaut, tout composant de l'App Router est un Server Component : il s'exécute côté serveur, n'envoie pas de JS au navigateur, mais ne peut pas utiliser de hooks d'interactivité. La directive \"use client\" en haut du fichier bascule vers un Client Component classique."
       },
       {
+        concept: "api-routes",
         prompt: "Que permet un fichier route.ts placé dans app/api/utilisateurs/ ?",
         options: [
           "De styliser une page",
@@ -673,6 +721,7 @@ const MODULES = [
         explain: "Un fichier route.ts dans app/api/ exporte des fonctions nommées GET, POST, etc., qui définissent un véritable endpoint d'API REST, exécuté côté serveur — exactement comme une route Express, mais intégrée à Next.js."
       },
       {
+        concept: "ssr-ssg",
         prompt: "Qu'est-ce que le SSG (Static Site Generation) ?",
         options: [
           "Générer le HTML à chaque requête utilisateur",
@@ -684,6 +733,7 @@ const MODULES = [
         explain: "Avec le SSG, les pages sont pré-générées en HTML statique au moment du build, puis servies telles quelles (souvent via un CDN). C'est idéal pour du contenu qui ne change pas à chaque requête (blog, documentation, landing page)."
       },
       {
+        concept: "ssr-ssg",
         prompt: "Comment récupère-t-on des données côté serveur dans un Server Component de l'App Router ?",
         options: [
           "Avec useEffect et fetch, comme dans une app React classique",
@@ -695,6 +745,7 @@ const MODULES = [
         explain: "Un Server Component peut être une fonction async : on peut donc faire directement await fetch(...) (ou interroger une base de données) au cœur du composant, sans passer par useEffect, puisque le code s'exécute côté serveur avant l'envoi au navigateur."
       },
       {
+        concept: "routing",
         prompt: "Que fait <Link> (next/link) par rapport à une balise <a> classique ?",
         options: [
           "Rien de particulier, c'est purement cosmétique",
@@ -706,6 +757,7 @@ const MODULES = [
         explain: "<Link> intercepte la navigation pour la gérer côté client (sans recharger toute la page) et précharge automatiquement la page de destination en arrière-plan, ce qui rend la navigation quasi instantanée."
       },
       {
+        concept: "routing",
         prompt: "Quel fichier spécial définit une mise en page partagée (header/footer communs) pour un groupe de routes ?",
         options: ["page.tsx", "layout.tsx", "config.tsx", "index.tsx"],
         correct: 1,
@@ -713,6 +765,7 @@ const MODULES = [
       },
       {
         type: "order",
+        concept: "api-routes",
         prompt: "Remets dans l'ordre une route API Next.js (app/api/ping/route.ts) qui répond en JSON.",
         lines: [
           "export async function GET() {",
@@ -725,6 +778,7 @@ const MODULES = [
       {
         type: "code",
         technical: true,
+        concept: "routing",
         prompt: "Corrige buildStaticParams(slugs) : pour generateStaticParams (App Router), elle doit renvoyer un tableau d'objets { params: { slug } }, un par slug — pas les slugs bruts.",
         starter: "function buildStaticParams(slugs) {\n  // bug : renvoie les slugs bruts au lieu du format attendu\n  return slugs;\n}",
         tests: [
@@ -754,6 +808,7 @@ const MODULES = [
     intro: "Côté serveur, Express reste le framework Node.js le plus répandu pour exposer des APIs REST robustes et bien structurées.",
     questions: [
       {
+        concept: "routes-express",
         prompt: "Qu'est-ce qu'Express, en une phrase ?",
         options: [
           "Une base de données",
@@ -765,6 +820,7 @@ const MODULES = [
         explain: "Express est une couche fine au-dessus du module http de Node.js, qui simplifie énormément la définition de routes, de middlewares et la gestion des requêtes/réponses HTTP."
       },
       {
+        concept: "middlewares",
         code: `app.use(express.json());`,
         prompt: "Que fait précisément cette ligne ?",
         options: [
@@ -777,12 +833,14 @@ const MODULES = [
         explain: "Sans ce middleware, req.body serait undefined pour des requêtes envoyées en JSON. express.json() lit le flux de la requête, le parse, et le place dans req.body pour que les routes suivantes puissent l'utiliser directement."
       },
       {
+        concept: "rest",
         prompt: "Dans une API REST, quelle méthode HTTP utilise-t-on typiquement pour créer une nouvelle ressource ?",
         options: ["GET", "POST", "DELETE", "OPTIONS"],
         correct: 1,
         explain: "Par convention REST : GET lit, POST crée, PUT/PATCH met à jour, DELETE supprime. POST /utilisateurs, par exemple, crée un nouvel utilisateur."
       },
       {
+        concept: "middlewares",
         prompt: "Qu'est-ce qu'un middleware en Express ?",
         options: [
           "Une base de données intermédiaire",
@@ -794,18 +852,21 @@ const MODULES = [
         explain: "Un middleware reçoit (req, res, next) et peut inspecter/modifier la requête, répondre directement, ou passer la main au middleware/route suivant via next(). C'est la brique de base de tout traitement Express (auth, logs, parsing...)."
       },
       {
+        concept: "rest",
         prompt: "Quel code de statut HTTP signifie \"ressource créée avec succès\" ?",
         options: ["200", "201", "404", "500"],
         correct: 1,
         explain: "200 OK est une réussite générique, mais 201 Created indique précisément qu'une nouvelle ressource a bien été créée (typiquement en réponse à un POST réussi)."
       },
       {
+        concept: "routes-express",
         prompt: "Quelle est la signature typique d'un gestionnaire de route Express ?",
         options: ["(req, res, next) => {}", "(props) => {}", "(state, action) => {}", "(event) => {}"],
         correct: 0,
         explain: "Chaque route Express reçoit la requête (req), la réponse (res), et optionnellement la fonction next pour passer au middleware suivant — c'est la signature universelle des handlers Express."
       },
       {
+        concept: "rest",
         prompt: "Pourquoi versionne-t-on souvent une API REST (ex : /api/v1/...) ?",
         options: [
           "Pour ralentir volontairement les requêtes",
@@ -817,6 +878,7 @@ const MODULES = [
         explain: "Le versionnage (v1, v2...) permet d'introduire des changements majeurs dans une nouvelle version, tout en laissant les applications existantes continuer à fonctionner sur l'ancienne, le temps qu'elles migrent."
       },
       {
+        concept: "routes-express",
         prompt: "Quelle est la différence entre req.params, req.query et req.body ?",
         options: [
           "Ils sont identiques",
@@ -829,6 +891,7 @@ const MODULES = [
       },
       {
         type: "order",
+        concept: "middlewares",
         prompt: "Remets dans l'ordre la mise en place d'un serveur Express minimal. Attention à la place du middleware !",
         lines: [
           "const app = express();",
@@ -841,6 +904,7 @@ const MODULES = [
       {
         type: "code",
         technical: true,
+        concept: "rest",
         prompt: "Corrige statusCategory(code) : elle classe un code HTTP par famille, mais confond actuellement les erreurs client (4xx) et serveur (5xx).",
         starter: "function statusCategory(code) {\n  if (code >= 200 && code < 300) return \"success\";\n  if (code >= 400 && code < 600) return \"client-error\"; // bug ici\n  return \"other\";\n}",
         tests: [
@@ -870,6 +934,7 @@ const MODULES = [
     intro: "Aucune app moderne n'existe sans outillage : Vite gère le développement et la mise en production de ton code de façon rapide et optimisée.",
     questions: [
       {
+        concept: "build",
         prompt: "Quel est le rôle principal d'un outil comme Vite ?",
         options: [
           "Gérer une base de données",
@@ -881,6 +946,7 @@ const MODULES = [
         explain: "Vite a deux casquettes : un serveur de développement très rapide grâce aux modules ES natifs, et un bundler (basé sur Rollup) pour produire un build optimisé destiné à la production."
       },
       {
+        concept: "build",
         prompt: "Pourquoi Vite est-il si rapide en développement, comparé à des bundlers plus anciens en mode dev classique ?",
         options: [
           "Il compile l'intégralité du projet avant de le servir",
@@ -892,12 +958,14 @@ const MODULES = [
         explain: "Plutôt que de tout bundler avant de démarrer, Vite sert les fichiers via les imports ES natifs du navigateur et ne transforme que ce qui est effectivement demandé, page par page — d'où un démarrage quasi instantané."
       },
       {
+        concept: "build",
         prompt: "Quelle commande crée typiquement le build de production optimisé avec Vite ?",
         options: ["vite dev", "vite build", "vite serve", "vite start"],
         correct: 1,
         explain: "vite build génère les fichiers statiques optimisés (minifiés, avec hash de cache) dans le dossier de sortie, prêts à être déployés."
       },
       {
+        concept: "build",
         prompt: "Qu'est-ce que le \"tree-shaking\" effectué par les bundlers ?",
         options: [
           "Une animation visuelle",
@@ -909,12 +977,14 @@ const MODULES = [
         explain: "Le tree-shaking analyse les imports/exports réellement utilisés et retire du bundle final tout le code qui n'est jamais importé, réduisant ainsi le poids final envoyé au navigateur."
       },
       {
+        concept: "build",
         prompt: "Quel fichier permet de personnaliser la configuration de Vite (plugins, alias, etc.) ?",
         options: ["package.json uniquement", "vite.config.js (ou .ts)", ".babelrc", "webpack.config.js"],
         correct: 1,
         explain: "vite.config.js (ou .ts) centralise la configuration : plugins (React, etc.), alias de chemins, variables d'environnement, configuration du serveur de dev, options de build..."
       },
       {
+        concept: "env-vite",
         prompt: "Pourquoi utilise-t-on des variables d'environnement (fichier .env) dans un projet Vite ?",
         options: [
           "Pour stocker du code JavaScript exécutable",
@@ -927,6 +997,7 @@ const MODULES = [
       },
       {
         type: "order",
+        concept: "build",
         prompt: "Remets dans l'ordre un fichier vite.config.js minimal avec le plugin React.",
         lines: [
           "import { defineConfig } from 'vite';",
@@ -940,6 +1011,7 @@ const MODULES = [
       {
         type: "code",
         technical: true,
+        concept: "env-vite",
         prompt: "Corrige resolveApiUrl(env) : elle doit lire env.VITE_API_URL, et se rabattre sur 'http://localhost:3000' dès que la variable est absente OU vide — pas seulement absente.",
         starter: "function resolveApiUrl(env) {\n  // bug : une chaîne vide est traitée comme une URL valide\n  return env.VITE_API_URL !== undefined ? env.VITE_API_URL : 'http://localhost:3000';\n}",
         tests: [
@@ -969,6 +1041,7 @@ const MODULES = [
     intro: "Le défi final : des mises en situation qui combinent frontend, backend, types et architecture — exactement ce qu'on rencontre en gérant un vrai projet fullstack.",
     questions: [
       {
+        concept: "middlewares",
         prompt: "Ton frontend Next.js (localhost:3000) appelle une API Express séparée (localhost:3001) en local. Le navigateur bloque la requête. Quel est le problème et comment le résoudre côté serveur ?",
         options: [
           "Aucun problème, ça fonctionne nativement",
@@ -980,6 +1053,7 @@ const MODULES = [
         explain: "Le navigateur bloque par défaut les requêtes vers une origine différente (port différent = origine différente). Le middleware cors, configuré côté Express avec la bonne origine autorisée, résout ce problème proprement."
       },
       {
+        concept: "middlewares",
         prompt: "Tu veux protéger une route Express pour qu'elle ne soit accessible qu'aux utilisateurs authentifiés. Quelle approche est appropriée ?",
         options: [
           "Vérifier un mot de passe en clair directement dans l'URL",
@@ -991,6 +1065,7 @@ const MODULES = [
         explain: "La sécurité doit toujours être vérifiée côté serveur : un middleware d'authentification lit le token envoyé (souvent dans l'en-tête Authorization), le valide, et bloque la requête (ou appelle next()) selon le résultat. Cacher un bouton côté frontend n'empêche jamais un appel direct à l'API."
       },
       {
+        concept: "ssr-ssg",
         prompt: "Dans une app Next.js qui affiche le profil privé d'un utilisateur, où vaut-il mieux récupérer ces données sensibles ?",
         options: [
           "Toujours côté client avec useEffect, quel que soit le contexte",
@@ -1002,6 +1077,7 @@ const MODULES = [
         explain: "Récupérer et vérifier les données sensibles côté serveur (Server Component) évite d'exposer temporairement des données privées dans le navigateur avant qu'une vérification d'authentification client n'ait lieu."
       },
       {
+        concept: "types-ts",
         prompt: "Tu utilises TypeScript à la fois sur ton frontend React et ton backend Express. Quel est l'avantage de partager les types (ex : l'interface User) entre les deux ?",
         options: [
           "Cela ralentit volontairement le projet",
@@ -1013,6 +1089,7 @@ const MODULES = [
         explain: "Quand le frontend et le backend partagent les mêmes définitions de types (souvent via un package ou dossier commun), une modification de structure côté backend est immédiatement signalée comme erreur de type côté frontend si celui-ci n'est pas mis à jour."
       },
       {
+        concept: "build",
         prompt: "Ton build Vite est lent à charger en production et le bundle final est trop lourd. Quelle action est la plus pertinente ?",
         options: [
           "Ajouter encore plus de dépendances au projet",
@@ -1024,6 +1101,7 @@ const MODULES = [
         explain: "Avant d'optimiser à l'aveugle, on analyse ce qui compose réellement le bundle (taille par dépendance), puis on découpe le code par route/fonctionnalité (code-splitting, import() dynamique) pour ne charger que le strict nécessaire à chaque page."
       },
       {
+        concept: "api-routes",
         prompt: "Pour une nouvelle application, comment choisir entre \"monolithe Next.js avec API routes intégrées\" et \"Next.js frontend + Express backend séparé\" ?",
         options: [
           "Selon la couleur du thème choisi",
