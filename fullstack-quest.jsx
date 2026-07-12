@@ -2930,6 +2930,103 @@ function ChantierView({ ctx }) {
 }
 
 /* --- Admin : enrichir la banque de questions centrale ----------------- */
+
+// Table de correspondance pour le bouton "Tagger les concepts" ci-dessous :
+// mêmes questions, mêmes tags que ceux appliqués au tableau MODULES (voir
+// commit "tags de concept sur la banque de questions"). Les questions déjà
+// en banque ont été importées AVANT que le champ concept existe — ce bouton
+// retrouve chaque question par le même hash de contenu que le serveur
+// (voir contentHash) et lui applique son concept. qtype omis = "qcm".
+const CONCEPT_TAGS = [
+  // js-fond
+  { moduleId: "js-fond", qtype: "qcm", prompt: "Quel mot-clé déclare une variable qui ne peut pas être réaffectée ?", concept: "variables" },
+  { moduleId: "js-fond", qtype: "qcm", prompt: "Que renvoie l'expression typeof null ?", concept: "types" },
+  { moduleId: "js-fond", qtype: "qcm", prompt: "Que va afficher ce code, dans l'ordre ?", concept: "types" },
+  { moduleId: "js-fond", qtype: "qcm", prompt: "Quelle est la vraie différence entre == et === ?", concept: "types" },
+  { moduleId: "js-fond", qtype: "qcm", prompt: "Quelle portée (scope) a une variable déclarée avec let à l'intérieur d'un bloc { } ?", concept: "variables" },
+  { moduleId: "js-fond", qtype: "qcm", prompt: "Que va afficher ce code ?", concept: "fonctions" },
+  { moduleId: "js-fond", qtype: "qcm", prompt: "Quel type de fonction n'a pas son propre this (il hérite de celui du contexte englobant) ?", concept: "fonctions" },
+  { moduleId: "js-fond", qtype: "qcm", prompt: "Quelle méthode de tableau applique une fonction à chaque élément et retourne un NOUVEAU tableau de même longueur ?", concept: "tableaux" },
+  { moduleId: "js-fond", qtype: "code", prompt: "Écris une fonction somme(a, b) qui renvoie la somme de deux nombres.", concept: "fonctions" },
+  // js-avance
+  { moduleId: "js-avance", qtype: "qcm", prompt: "Que fait l'opérateur spread dans [...arr1, ...arr2] ?", concept: "spread-rest" },
+  { moduleId: "js-avance", qtype: "qcm", prompt: "Que va afficher console.log(b) ?", concept: "destructuring" },
+  { moduleId: "js-avance", qtype: "qcm", prompt: "Qu'affiche ce code ?", concept: "closures" },
+  { moduleId: "js-avance", qtype: "qcm", prompt: "Dans une méthode d'objet, quelle est la valeur de this dans une fonction fléchée définie à l'intérieur ?", concept: "this" },
+  { moduleId: "js-avance", qtype: "qcm", prompt: "Avec \"type\": \"module\" dans package.json, quel système de modules Node.js utilise-t-il par défaut ?", concept: "modules-es6" },
+  { moduleId: "js-avance", qtype: "qcm", prompt: "Quelle est la vraie différence entre une copie \"shallow\" (superficielle) et \"deep\" (profonde) d'un objet ?", concept: "spread-rest" },
+  { moduleId: "js-avance", qtype: "code", prompt: "Écris une fonction pairs(arr) qui renvoie un NOUVEAU tableau avec uniquement les nombres pairs.", concept: "tableaux" },
+  // async
+  { moduleId: "async", qtype: "qcm", prompt: "Quelle est la vraie différence entre un callback et une Promise ?", concept: "promises" },
+  { moduleId: "async", qtype: "qcm", prompt: "Que fait précisément le mot-clé await ?", concept: "async-await" },
+  { moduleId: "async", qtype: "qcm", prompt: "Dans quel ordre ces nombres s'affichent-ils ?", concept: "event-loop" },
+  { moduleId: "async", qtype: "qcm", prompt: "Que fait Promise.all([p1, p2, p3]) ?", concept: "promises" },
+  { moduleId: "async", qtype: "qcm", prompt: "Quelle est la différence entre Promise.all et Promise.allSettled ?", concept: "promises" },
+  { moduleId: "async", qtype: "qcm", prompt: "Que renvoie fetch(url) par défaut ?", concept: "fetch" },
+  { moduleId: "async", qtype: "qcm", prompt: "Que se passe-t-il si une Promise est rejetée sans aucun .catch ni try/catch ?", concept: "promises" },
+  { moduleId: "async", qtype: "qcm", prompt: "Comment exécuter plusieurs appels asynchrones en parallèle plutôt qu'en série ?", concept: "promises" },
+  { moduleId: "async", qtype: "order", prompt: "Remets dans le bon ordre le corps d'une fonction async qui récupère puis renvoie des données JSON.", concept: "fetch" },
+  { moduleId: "async", qtype: "code", prompt: "Ce code a un bug : doubleAsync(nums) doit renvoyer une Promise résolue avec les nombres doublés, mais elle renvoie un tableau de Promises non résolues. Corrige-la avec Promise.all.", concept: "promises" },
+  // ts
+  { moduleId: "ts", qtype: "qcm", prompt: "Quel est l'avantage principal de TypeScript par rapport à JavaScript pur ?", concept: "types-ts" },
+  { moduleId: "ts", qtype: "qcm", prompt: "Comment typer correctement une fonction qui prend un nombre et retourne une chaîne ?", concept: "types-ts" },
+  { moduleId: "ts", qtype: "qcm", prompt: "Parmi ces affirmations sur interface vs type en TypeScript, laquelle est correcte ?", concept: "interfaces" },
+  { moduleId: "ts", qtype: "qcm", prompt: "Que permet ce \"generic\" <T> ?", concept: "generiques" },
+  { moduleId: "ts", qtype: "qcm", prompt: "Que signifie le ? après email dans cette interface ?", concept: "interfaces" },
+  { moduleId: "ts", qtype: "qcm", prompt: "Comment représente-t-on en TypeScript \"soit une chaîne, soit un nombre\" ?", concept: "types-ts" },
+  { moduleId: "ts", qtype: "qcm", prompt: "À quoi sert as const ici ?", concept: "types-ts" },
+  { moduleId: "ts", qtype: "qcm", prompt: "Pourquoi préférer unknown à any quand on reçoit une donnée dont le type n'est pas garanti ?", concept: "types-ts" },
+  // react
+  { moduleId: "react", qtype: "qcm", prompt: "Qu'est-ce qu'un composant React, fondamentalement ?", concept: "composants" },
+  { moduleId: "react", qtype: "qcm", prompt: "Que fait le hook useState ?", concept: "state" },
+  { moduleId: "react", qtype: "qcm", prompt: "Quand ce useEffect s'exécute-t-il, avec un tableau de dépendances vide ?", concept: "effets" },
+  { moduleId: "react", qtype: "qcm", prompt: "Quelle règle s'applique aux props reçues par un composant enfant ?", concept: "props" },
+  { moduleId: "react", qtype: "qcm", prompt: "Pourquoi utiliser une key unique sur chaque élément d'une liste ?", concept: "composants" },
+  { moduleId: "react", qtype: "qcm", prompt: "Que fait le hook useMemo ?", concept: "hooks" },
+  { moduleId: "react", qtype: "qcm", prompt: "Quelle est la différence entre un input \"contrôlé\" et \"non contrôlé\" en React ?", concept: "state" },
+  { moduleId: "react", qtype: "qcm", prompt: "À quoi sert le Context API de React ?", concept: "props" },
+  { moduleId: "react", qtype: "order", prompt: "Remets dans l'ordre les lignes d'un composant React à compteur.", concept: "state" },
+  { moduleId: "react", qtype: "code", prompt: "Ce reducer de compteur a un bug : \"reset\" ne remet pas le compteur à zéro. Corrige counterReducer(state, action).", concept: "hooks" },
+  // next
+  { moduleId: "next", qtype: "qcm", prompt: "Quel est l'avantage principal de Next.js par rapport à une app React \"classique\" (créée avec Vite seul) ?", concept: "ssr-ssg" },
+  { moduleId: "next", qtype: "qcm", prompt: "Dans l'App Router (dossier app/), comment crée-t-on une nouvelle route /blog ?", concept: "routing" },
+  { moduleId: "next", qtype: "qcm", prompt: "Quelle est la vraie différence entre un Server Component et un Client Component dans l'App Router ?", concept: "ssr-ssg" },
+  { moduleId: "next", qtype: "qcm", prompt: "Que permet un fichier route.ts placé dans app/api/utilisateurs/ ?", concept: "api-routes" },
+  { moduleId: "next", qtype: "qcm", prompt: "Qu'est-ce que le SSG (Static Site Generation) ?", concept: "ssr-ssg" },
+  { moduleId: "next", qtype: "qcm", prompt: "Comment récupère-t-on des données côté serveur dans un Server Component de l'App Router ?", concept: "ssr-ssg" },
+  { moduleId: "next", qtype: "qcm", prompt: "Que fait <Link> (next/link) par rapport à une balise <a> classique ?", concept: "routing" },
+  { moduleId: "next", qtype: "qcm", prompt: "Quel fichier spécial définit une mise en page partagée (header/footer communs) pour un groupe de routes ?", concept: "routing" },
+  { moduleId: "next", qtype: "order", prompt: "Remets dans l'ordre une route API Next.js (app/api/ping/route.ts) qui répond en JSON.", concept: "api-routes" },
+  { moduleId: "next", qtype: "code", prompt: "Corrige buildStaticParams(slugs) : pour generateStaticParams (App Router), elle doit renvoyer un tableau d'objets { params: { slug } }, un par slug — pas les slugs bruts.", concept: "routing" },
+  // express
+  { moduleId: "express", qtype: "qcm", prompt: "Qu'est-ce qu'Express, en une phrase ?", concept: "routes-express" },
+  { moduleId: "express", qtype: "qcm", prompt: "Que fait précisément cette ligne ?", concept: "middlewares" },
+  { moduleId: "express", qtype: "qcm", prompt: "Dans une API REST, quelle méthode HTTP utilise-t-on typiquement pour créer une nouvelle ressource ?", concept: "rest" },
+  { moduleId: "express", qtype: "qcm", prompt: "Qu'est-ce qu'un middleware en Express ?", concept: "middlewares" },
+  { moduleId: "express", qtype: "qcm", prompt: "Quel code de statut HTTP signifie \"ressource créée avec succès\" ?", concept: "rest" },
+  { moduleId: "express", qtype: "qcm", prompt: "Quelle est la signature typique d'un gestionnaire de route Express ?", concept: "routes-express" },
+  { moduleId: "express", qtype: "qcm", prompt: "Pourquoi versionne-t-on souvent une API REST (ex : /api/v1/...) ?", concept: "rest" },
+  { moduleId: "express", qtype: "qcm", prompt: "Quelle est la différence entre req.params, req.query et req.body ?", concept: "routes-express" },
+  { moduleId: "express", qtype: "order", prompt: "Remets dans l'ordre la mise en place d'un serveur Express minimal. Attention à la place du middleware !", concept: "middlewares" },
+  { moduleId: "express", qtype: "code", prompt: "Corrige statusCategory(code) : elle classe un code HTTP par famille, mais confond actuellement les erreurs client (4xx) et serveur (5xx).", concept: "rest" },
+  // vite
+  { moduleId: "vite", qtype: "qcm", prompt: "Quel est le rôle principal d'un outil comme Vite ?", concept: "build" },
+  { moduleId: "vite", qtype: "qcm", prompt: "Pourquoi Vite est-il si rapide en développement, comparé à des bundlers plus anciens en mode dev classique ?", concept: "build" },
+  { moduleId: "vite", qtype: "qcm", prompt: "Quelle commande crée typiquement le build de production optimisé avec Vite ?", concept: "build" },
+  { moduleId: "vite", qtype: "qcm", prompt: "Qu'est-ce que le \"tree-shaking\" effectué par les bundlers ?", concept: "build" },
+  { moduleId: "vite", qtype: "qcm", prompt: "Quel fichier permet de personnaliser la configuration de Vite (plugins, alias, etc.) ?", concept: "build" },
+  { moduleId: "vite", qtype: "qcm", prompt: "Pourquoi utilise-t-on des variables d'environnement (fichier .env) dans un projet Vite ?", concept: "env-vite" },
+  { moduleId: "vite", qtype: "order", prompt: "Remets dans l'ordre un fichier vite.config.js minimal avec le plugin React.", concept: "build" },
+  { moduleId: "vite", qtype: "code", prompt: "Corrige resolveApiUrl(env) : elle doit lire env.VITE_API_URL, et se rabattre sur 'http://localhost:3000' dès que la variable est absente OU vide — pas seulement absente.", concept: "env-vite" },
+  // boss
+  { moduleId: "boss", qtype: "qcm", prompt: "Ton frontend Next.js (localhost:3000) appelle une API Express séparée (localhost:3001) en local. Le navigateur bloque la requête. Quel est le problème et comment le résoudre côté serveur ?", concept: "middlewares" },
+  { moduleId: "boss", qtype: "qcm", prompt: "Tu veux protéger une route Express pour qu'elle ne soit accessible qu'aux utilisateurs authentifiés. Quelle approche est appropriée ?", concept: "middlewares" },
+  { moduleId: "boss", qtype: "qcm", prompt: "Dans une app Next.js qui affiche le profil privé d'un utilisateur, où vaut-il mieux récupérer ces données sensibles ?", concept: "ssr-ssg" },
+  { moduleId: "boss", qtype: "qcm", prompt: "Tu utilises TypeScript à la fois sur ton frontend React et ton backend Express. Quel est l'avantage de partager les types (ex : l'interface User) entre les deux ?", concept: "types-ts" },
+  { moduleId: "boss", qtype: "qcm", prompt: "Ton build Vite est lent à charger en production et le bundle final est trop lourd. Quelle action est la plus pertinente ?", concept: "build" },
+  { moduleId: "boss", qtype: "qcm", prompt: "Pour une nouvelle application, comment choisir entre \"monolithe Next.js avec API routes intégrées\" et \"Next.js frontend + Express backend séparé\" ?", concept: "api-routes" },
+];
+
 const EMPTY_FORM = {
   moduleId: "js-fond", qtype: "qcm", technical: false,
   prompt: "", explain: "", code: "", concept: "",
@@ -3129,6 +3226,9 @@ function AdminView({ ctx }) {
   // Import en masse des secteurs avancés dans la banque (prérequis Phase B).
   const [seedBusy, setSeedBusy] = useState(false);
   const [seedReport, setSeedReport] = useState(null); // { added, skipped, unrepresentable, failed, errors:[] }
+  // Tagging en masse des concepts (Phase 5) sur les questions déjà en banque.
+  const [tagBusy, setTagBusy] = useState(false);
+  const [tagReport, setTagReport] = useState(null); // { matched, updated, alreadyOk, unmatched, failed, errors:[] }
 
   const f = (patch) => { setForm((s) => ({ ...s, ...patch })); setSolResults(null); };
 
@@ -3175,6 +3275,54 @@ function AdminView({ ctx }) {
       setError(String(e?.message || e));
     } finally {
       setSeedBusy(false);
+    }
+  }
+
+  // Tague les questions déjà en banque avec leur concept (CONCEPT_TAGS
+  // ci-dessus), en les retrouvant par le même hash de contenu que le serveur
+  // — la banque a été importée avant que le champ concept existe, ce bouton
+  // rattrape ce qui manque. Idempotent : une question déjà au bon concept est
+  // comptée "déjà à jour" et n'est pas réécrite ; relançable sans risque.
+  async function applyConceptTags() {
+    if (tagBusy) return;
+    setTagBusy(true);
+    setError("");
+    setNotice("");
+    const report = { matched: 0, updated: 0, alreadyOk: 0, unmatched: 0, failed: 0, errors: [] };
+    try {
+      const byHash = {};
+      for (const t of CONCEPT_TAGS) {
+        byHash[await contentHash(t.moduleId, t.qtype, t.prompt)] = t.concept;
+      }
+      const data = await adminFetch("/api/v1/admin/questions", adminKey);
+      for (const row of data.questions || []) {
+        const concept = byHash[await contentHash(row.moduleId, row.qtype, row.prompt)];
+        if (concept === undefined) { report.unmatched += 1; continue; }
+        report.matched += 1;
+        if (row.concept === concept) { report.alreadyOk += 1; continue; }
+        try {
+          await adminFetch(`/api/v1/admin/questions/${row.id}`, adminKey, {
+            method: "PUT",
+            body: JSON.stringify({
+              moduleId: row.moduleId, qtype: row.qtype, technical: !!row.technical,
+              prompt: row.prompt, explain: row.explain, concept,
+              code: row.code, options: row.options, correct: row.correct,
+              starter: row.starter, tests: row.tests, lines: row.lines,
+            }),
+          });
+          report.updated += 1;
+        } catch (e) {
+          report.failed += 1;
+          if (report.errors.length < 5) report.errors.push(`${row.moduleId} · ${row.prompt.slice(0, 40)} → ${String(e?.message || e)}`);
+        }
+      }
+      setTagReport(report);
+      await refreshBank();
+      await loadList();
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setTagBusy(false);
     }
   }
 
@@ -3346,6 +3494,35 @@ function AdminView({ ctx }) {
                   {seedReport.unrepresentable > 0 && <>{" · "}<span style={{ color: AMBER }}>{seedReport.unrepresentable} non migrable(s)</span></>}
                   {seedReport.failed > 0 && <>{" · "}<span style={{ color: DANGER }}>{seedReport.failed} échec(s)</span></>}
                   {seedReport.errors.map((err, i) => (
+                    <p key={i} className="mt-1" style={{ color: DANGER }}>{err}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Tagging en masse : la banque a été importée avant que le champ
+                concept existe (voir CONCEPT_TAGS) — ce bouton rattrape les
+                questions déjà en base. Sans risque : relançable, une question
+                déjà au bon concept est ignorée. */}
+            <div className="mb-3 p-3 rounded-lg" style={{ backgroundColor: PANEL, border: `1px solid ${LINE}` }}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-mono text-[11px] tracking-widest" style={{ color: "#B388FF" }}>🏷 TAGGER LES CONCEPTS</p>
+                  <p className="text-[11px] leading-relaxed mt-0.5" style={{ color: TEXT_MUTED }}>
+                    Applique un concept (vocabulaire fermé) aux questions déjà en banque, pour alimenter la maîtrise par concept. Sans risque : relançable, les questions déjà à jour sont ignorées.
+                  </p>
+                </div>
+                <button onClick={applyConceptTags} disabled={tagBusy} className="px-3 py-1.5 rounded-lg font-mono text-xs shrink-0 disabled:opacity-50" style={{ backgroundColor: "#B388FF", color: BG }}>
+                  {tagBusy ? "Tag…" : "Tagger"}
+                </button>
+              </div>
+              {tagReport && (
+                <div className="mt-2 text-[11px] font-mono" style={{ color: TEXT }}>
+                  <span style={{ color: SUCCESS }}>{tagReport.updated} tagguée(s)</span>
+                  {" · "}<span style={{ color: TEXT_MUTED }}>{tagReport.alreadyOk} déjà à jour</span>
+                  {" · "}<span style={{ color: TEXT_MUTED }}>{tagReport.unmatched} hors table</span>
+                  {tagReport.failed > 0 && <>{" · "}<span style={{ color: DANGER }}>{tagReport.failed} échec(s)</span></>}
+                  {tagReport.errors.map((err, i) => (
                     <p key={i} className="mt-1" style={{ color: DANGER }}>{err}</p>
                   ))}
                 </div>
