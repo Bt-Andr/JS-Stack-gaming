@@ -135,6 +135,107 @@ const MODULES = [
         explain: "some() renvoie true dès qu'un élément satisfait le test. every() exige que TOUS les éléments le satisfassent. find() renvoie l'élément lui-même (ou undefined), pas un booléen. includes() teste une valeur précise, pas une condition."
       },
       {
+        concept: "objets",
+        prompt: "Comment ajouter dynamiquement une propriété email à un objet utilisateur existant ?",
+        options: [
+          "utilisateur.email = 'a@b.com';",
+          "utilisateur.add('email', 'a@b.com');",
+          "utilisateur.push('email');",
+          "Impossible après la création de l'objet"
+        ],
+        correct: 0,
+        explain: "Contrairement à const qui empêche de RÉASSIGNER la variable utilisateur, les propriétés de l'objet référencé restent librement modifiables : la notation point (ou crochets) permet d'ajouter ou modifier une propriété à tout moment."
+      },
+      {
+        concept: "objets",
+        code: `const a = { x: 1 };\nconst b = { x: 1 };\nconsole.log(a === b);`,
+        prompt: "Que va afficher ce code ?",
+        options: ["true", "false", "undefined", "Erreur"],
+        correct: 1,
+        explain: "=== compare la RÉFÉRENCE pour les objets, pas leur contenu. a et b sont deux objets distincts en mémoire, même s'ils ont un contenu identique — la comparaison vaut donc false."
+      },
+      {
+        concept: "objets",
+        code: `const cle = "age";\nconst utilisateur = { nom: "Léa", age: 30 };`,
+        prompt: "Comment lire la valeur associée à cle (\"age\") via cette variable ?",
+        options: ["utilisateur.cle", "utilisateur[cle]", "utilisateur->cle", "utilisateur.get(cle)"],
+        correct: 1,
+        explain: "La notation point (utilisateur.age) exige un nom LITTÉRAL connu à l'écriture. Pour un nom dynamique stocké dans une variable, il faut la notation crochets : utilisateur[cle] évalue cle puis accède à la propriété correspondante."
+      },
+      {
+        concept: "boucles",
+        code: `for (let i = 0; i < 5; i++) {\n  if (i === 2) continue;\n  console.log(i);\n}`,
+        prompt: "Que va afficher ce code ?",
+        options: ["0 1 2 3 4", "0 1 3 4", "0 1", "2"],
+        correct: 1,
+        explain: "continue passe directement à l'itération suivante SANS exécuter le reste du corps de la boucle pour cette itération. Quand i vaut 2, console.log(2) est sauté, mais la boucle continue normalement pour 3 et 4."
+      },
+      {
+        concept: "boucles",
+        prompt: "Quelle est la différence essentielle entre for...of et for...in sur un tableau ?",
+        options: [
+          "Aucune différence, ce sont des synonymes",
+          "for...of itère sur les VALEURS des éléments, for...in itère sur les INDICES (en tant que chaînes)",
+          "for...in ne fonctionne que sur les tableaux, for...of que sur les objets",
+          "for...of ne fonctionne pas avec les tableaux"
+        ],
+        correct: 1,
+        explain: "for (const v of tableau) donne directement chaque VALEUR. for (const i in tableau) donne chaque INDICE (sous forme de chaîne, ex: \"0\", \"1\"...) — d'où la confusion fréquente. Sur un tableau, for...of est presque toujours ce qu'on veut."
+      },
+      {
+        concept: "boucles",
+        code: `let i = 0;\nwhile (i < 3) {\n  console.log(i);\n  i++;\n}`,
+        prompt: "Combien de fois console.log(i) s'exécute-t-il ?",
+        options: ["2 fois", "3 fois", "4 fois", "Une boucle infinie"],
+        correct: 1,
+        explain: "La condition i < 3 est vérifiée AVANT chaque itération. Elle est vraie pour i=0, 1, 2 (3 exécutions), puis fausse pour i=3 : la boucle s'arrête. i++ étant bien présent, ce n'est pas une boucle infinie."
+      },
+      {
+        concept: "conditions",
+        prompt: "Que renvoie l'expression 0 || \"valeur par défaut\" ?",
+        options: ["0", "\"valeur par défaut\"", "false", "undefined"],
+        correct: 1,
+        explain: "0 est une valeur \"falsy\" (comme \"\", null, undefined, NaN). L'opérateur || renvoie le premier opérande VRAI (truthy) — comme 0 est falsy, il passe au suivant et renvoie \"valeur par défaut\". C'est un piège classique si on voulait justement garder 0 comme valeur légitime (dans ce cas, ?? est préférable)."
+      },
+      {
+        concept: "conditions",
+        prompt: "Quelle est la vraie différence entre l'opérateur || et l'opérateur ?? (nullish coalescing) ?",
+        options: [
+          "Aucune différence",
+          "|| bascule sur toute valeur \"falsy\" (0, \"\", false, null, undefined), alors que ?? ne bascule QUE si la valeur est null ou undefined",
+          "?? est plus rapide à l'exécution",
+          "|| ne fonctionne qu'avec des booléens"
+        ],
+        correct: 1,
+        explain: "?? a été introduit précisément pour distinguer \"absent\" (null/undefined) de \"faux/vide/zéro\" (autres valeurs falsy). const n = 0 ?? 5 vaut 0 (0 n'est ni null ni undefined), alors que const n = 0 || 5 vaudrait 5."
+      },
+      {
+        concept: "conditions",
+        code: `function statut(age) {\n  return age >= 18 ? "majeur" : "mineur";\n}`,
+        prompt: "Que fait l'opérateur ternaire (condition ? a : b) dans cette fonction ?",
+        options: [
+          "C'est un raccourci pour if/else qui RENVOIE directement une des deux valeurs selon la condition",
+          "Il exécute les deux branches à chaque appel",
+          "C'est une erreur de syntaxe en dehors d'une classe",
+          "Il ne fonctionne qu'avec des nombres"
+        ],
+        correct: 0,
+        explain: "L'opérateur ternaire est une EXPRESSION (elle produit une valeur), contrairement à if/else qui est une instruction. condition ? valeurSiVrai : valeurSiFaux évalue la condition et renvoie directement l'une des deux valeurs — pratique pour un return ou une affectation en une ligne."
+      },
+      {
+        type: "code",
+        technical: true,
+        concept: "boucles",
+        prompt: "Écris une fonction sommeJusqua(n) qui renvoie la somme des entiers de 1 à n (inclus) à l'aide d'une boucle.",
+        starter: "function sommeJusqua(n) {\n  // ton code ici\n}",
+        tests: [
+          { call: "sommeJusqua(5)", expect: 15 },
+          { call: "sommeJusqua(1)", expect: 1 },
+          { call: "sommeJusqua(0)", expect: 0 }
+        ],
+        explain: "Une boucle for accumule le total : let total = 0; for (let i = 1; i <= n; i++) total += i; return total; — chaque itération ajoute i au total."
+      },
+      {
         type: "code",
         technical: true,
         concept: "fonctions",
@@ -177,6 +278,19 @@ const MODULES = [
         ],
         correct: 0,
         explain: "L'opérateur ... \"étale\" les éléments d'un tableau (ou objet). Combiné avec [ ], il permet de construire un nouveau tableau qui contient une copie superficielle des éléments des tableaux d'origine."
+      },
+      {
+        type: "code",
+        technical: true,
+        concept: "spread-rest",
+        prompt: "Écris une fonction fusionner(a, b) qui renvoie un NOUVEL objet combinant les propriétés de a et b (b doit gagner en cas de clé commune), sans modifier a ni b.",
+        starter: "function fusionner(a, b) {\n  // indice : utilise le spread d'objet\n}",
+        tests: [
+          { call: "fusionner({x:1}, {y:2})", expect: { x: 1, y: 2 } },
+          { call: "fusionner({x:1}, {x:2})", expect: { x: 2 } },
+          { call: "fusionner({}, {})", expect: {} }
+        ],
+        explain: "{ ...a, ...b } crée un nouvel objet, copie d'abord les propriétés de a, puis celles de b — b écrase celles de a en cas de clé identique, sans jamais modifier a ou b eux-mêmes."
       },
       {
         concept: "destructuring",
@@ -243,6 +357,38 @@ const MODULES = [
         ],
         correct: 1,
         explain: "L'accumulateur de reduce peut être de n'importe quel type — ici un objet — ce qui permet de construire des structures complexes (comptage, regroupement, transformation) en un seul passage, pas seulement des sommes numériques."
+      },
+      {
+        concept: "prototypes",
+        prompt: "En JavaScript, comment un objet hérite-t-il des méthodes d'un autre, fondamentalement ?",
+        options: [
+          "Via une copie complète de toutes les méthodes à la création",
+          "Via une chaîne de prototypes : si une propriété n'est pas trouvée sur l'objet lui-même, JavaScript la cherche sur son prototype, puis le prototype du prototype, etc.",
+          "JavaScript ne supporte pas l'héritage",
+          "Uniquement via les classes ES6, aucun autre mécanisme n'existe"
+        ],
+        correct: 1,
+        explain: "Le prototype est le mécanisme d'héritage NATIF de JavaScript — la \"chaîne de prototypes\". class et extends (ES6) ne sont que du sucre syntaxique par-dessus ce même mécanisme, qui existait bien avant."
+      },
+      {
+        concept: "prototypes",
+        code: `class Animal {\n  parler() { return "..."; }\n}\nclass Chien extends Animal {\n  parler() { return "Wouf"; }\n}`,
+        prompt: "Que représente extends Animal dans cette classe Chien ?",
+        options: [
+          "Chien copie le code d'Animal une seule fois à la création",
+          "Chien place Animal.prototype dans sa propre chaîne de prototypes : Chien hérite de ses méthodes, et peut les redéfinir (comme parler ici)",
+          "C'est purement décoratif, sans effet sur le comportement",
+          "Ça rend Animal inutilisable seul après"
+        ],
+        correct: 1,
+        explain: "extends connecte les prototypes : les instances de Chien peuvent utiliser les méthodes d'Animal.prototype si elles ne les redéfinissent pas elles-mêmes. Ici, parler est redéfinie (override) dans Chien, donc c'est la version de Chien qui est utilisée."
+      },
+      {
+        concept: "prototypes",
+        prompt: "Quelle fonction JavaScript permet de vérifier si une propriété vient du prototype ou de l'objet lui-même (propriété \"propre\") ?",
+        options: ["typeof", "instanceof", "Object.prototype.hasOwnProperty", "Array.isArray"],
+        correct: 2,
+        explain: "hasOwnProperty renvoie true uniquement si la propriété existe DIRECTEMENT sur l'objet (pas héritée via le prototype). instanceof teste plutôt si un objet appartient à une chaîne de prototypes donnée (une classe), pas une propriété précise."
       },
       {
         concept: "closures",
@@ -434,6 +580,44 @@ const MODULES = [
     lore: "Fragment 03 — « Le Temps lui-même fut dompté le jour où les Gardiens cessèrent de bloquer le fil principal et apprirent à attendre sans s'arrêter. »",
     intro: "Le web est asynchrone par nature : requêtes réseau, fichiers, timers. Maîtriser les Promises et async/await est indispensable pour tout développeur fullstack.",
     questions: [
+      {
+        concept: "callbacks",
+        code: `setTimeout(() => {\n  console.log("Bonjour");\n}, 1000);`,
+        prompt: "Qu'est-ce que la fonction fléchée passée à setTimeout, dans ce code ?",
+        options: [
+          "Un callback : une fonction passée en argument, que setTimeout appellera plus tard (ici, après 1000ms)",
+          "Une Promise",
+          "Un générateur",
+          "Une erreur de syntaxe"
+        ],
+        correct: 0,
+        explain: "Un callback est simplement une fonction passée en argument à une autre fonction, pour être exécutée plus tard (souvent après un événement ou un délai). C'est le mécanisme asynchrone le plus ancien de JavaScript, antérieur aux Promises."
+      },
+      {
+        concept: "callbacks",
+        code: `function chercherDonnees(callback) {\n  setTimeout(() => {\n    callback(null, { id: 1 });\n  }, 100);\n}\nchercherDonnees((erreur, donnees) => {\n  if (erreur) return console.error(erreur);\n  console.log(donnees);\n});`,
+        prompt: "Pourquoi le callback reçoit-il DEUX arguments (erreur, donnees) ?",
+        options: [
+          "C'est une erreur, un callback ne devrait recevoir qu'un argument",
+          "C'est la convention \"error-first callback\" : le premier argument est réservé à une éventuelle erreur (null si tout va bien), le second au résultat",
+          "Le premier argument est toujours ignoré",
+          "Ça n'a aucune signification particulière"
+        ],
+        correct: 1,
+        explain: "\"Error-first callback\" est une convention historique de Node.js (encore visible dans certaines APIs) : puisqu'un callback ne peut pas throw de façon utile (il s'exécute plus tard, hors du try/catch appelant), l'erreur est transmise comme premier argument à vérifier explicitement."
+      },
+      {
+        concept: "callbacks",
+        prompt: "Quel est le principal défaut des callbacks imbriqués (\"callback hell\") que les Promises ont cherché à résoudre ?",
+        options: [
+          "Les callbacks sont plus lents à l'exécution",
+          "Un enchaînement de callbacks imbriqués (chacun dans le précédent) devient vite illisible et difficile à maintenir, avec une gestion d'erreurs répétée à chaque niveau",
+          "Les callbacks ne peuvent pas recevoir d'arguments",
+          "Les navigateurs ne supportent plus les callbacks"
+        ],
+        correct: 1,
+        explain: "Enchaîner des opérations asynchrones via callbacks imbriqués (chaque étape dans le callback de la précédente) crée un code en forme de pyramide, difficile à lire et où la gestion d'erreurs doit être répétée à chaque niveau. Les Promises (puis async/await) ont été conçues précisément pour aplatir cette structure."
+      },
       {
         concept: "promises",
         prompt: "Quelle est la vraie différence entre un callback et une Promise ?",
