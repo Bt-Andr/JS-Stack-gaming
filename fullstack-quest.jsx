@@ -67,7 +67,7 @@ const MODULES = [
       {
         concept: "variables",
         prompt: "Quelle est la portée d'une variable déclarée avec var à l'intérieur d'une fonction ?",
-        options: ["Portée de bloc uniquement", "Portée de toute la fonction, peu importe le bloc où elle est déclarée", "Portée globale uniquement", "Aucune portée, erreur"],
+        options: ["Portée de bloc uniquement, comme let", "Portée de toute la fonction qui la contient", "Portée globale, dans tous les cas", "Aucune portée : c'est une erreur"],
         correct: 1,
         explain: "var ignore les blocs ({ }) : une variable var déclarée n'importe où dans une fonction (même dans un if ou un for) est visible dans TOUTE la fonction, contrairement à let/const qui respectent les blocs."
       },
@@ -85,9 +85,9 @@ const MODULES = [
         prompt: "Que se passe-t-il avec ce code (comparé à la même chose avec var) ?",
         options: [
           "Même résultat qu'avec var : affiche undefined",
-          "ReferenceError : Cannot access 'y' before initialization — let est aussi \"hoisté\" mais reste dans une zone morte (temporal dead zone) jusqu'à sa déclaration",
-          "Affiche 5",
-          "Affiche null"
+          "ReferenceError : accès avant initialisation (zone morte)",
+          "Affiche la valeur 5",
+          "Affiche la valeur null"
         ],
         correct: 1,
         explain: "let (et const) sont techniquement hoistés eux aussi, mais restent inaccessibles dans la \"zone morte temporelle\" (temporal dead zone) entre le début du bloc et la ligne de déclaration. Y accéder avant lève une erreur, contrairement à var qui donnerait juste undefined."
@@ -96,7 +96,7 @@ const MODULES = [
         concept: "variables",
         code: `let compteur = 1;\nlet compteur = 2;`,
         prompt: "Que se passe-t-il avec cette redéclaration de compteur ?",
-        options: ["Aucun problème, compteur vaut 2", "SyntaxError : Identifier 'compteur' has already been declared — let interdit de redéclarer la même variable dans le même scope", "compteur devient un tableau [1, 2]", "Seul le second console.log fonctionnerait"],
+        options: ["Aucun problème, compteur vaut 2", "SyntaxError : 'compteur' déjà déclaré dans ce scope", "compteur devient le tableau [1, 2]", "Seul le second console.log fonctionnerait"],
         correct: 1,
         explain: "Contrairement à var (qui tolère silencieusement une redéclaration), let et const interdisent de déclarer deux fois la même variable dans le même bloc — c'est une erreur détectée à la compilation, avant même l'exécution."
       },
@@ -104,7 +104,7 @@ const MODULES = [
         concept: "variables",
         code: `const arr = [1, 2, 3];\narr.push(4);\nconsole.log(arr);`,
         prompt: "Ce code fonctionne-t-il, alors qu'arr est déclaré avec const ?",
-        options: ["Non, TypeError : Assignment to constant variable", "Oui : const empêche de réassigner la RÉFÉRENCE arr, mais le contenu du tableau référencé reste librement modifiable", "Non, il faudrait utiliser let", "Oui, mais arr redevient un let après le push"],
+        options: ["Non : TypeError, Assignment to constant variable", "Oui : const fige la référence, pas le contenu du tableau", "Non, il faudrait plutôt utiliser let", "Oui, mais arr redevient un let après push"],
         correct: 1,
         explain: "const verrouille uniquement le lien entre le nom arr et l'objet/tableau qu'il référence — pas le contenu de cet objet. push() modifie le tableau EN PLACE sans toucher à cette référence, donc c'est parfaitement légal."
       },
@@ -128,8 +128,8 @@ const MODULES = [
         prompt: "Quelle est la vraie différence entre == et === ?",
         options: [
           "Aucune, ils sont strictement identiques",
-          "== compare le type ET la valeur, === seulement la valeur",
-          "=== compare type et valeur (égalité stricte), == convertit les types avant de comparer",
+          "== compare le type ET la valeur, === juste la valeur",
+          "=== compare sans convertir ; == convertit d'abord les types",
           "Ils sont interchangeables dans tous les cas"
         ],
         correct: 2,
@@ -145,7 +145,7 @@ const MODULES = [
       {
         concept: "types",
         prompt: "Parmi ces valeurs, laquelle est \"truthy\" (convertie en true dans un contexte booléen) ?",
-        options: ["0", "\"\" (chaîne vide)", "\"0\" (chaîne contenant le caractère zéro)", "null"],
+        options: ["Le nombre 0", "\"\", une chaîne vide", "\"0\", une chaîne non vide", "La valeur null"],
         correct: 2,
         explain: "\"0\" est une chaîne NON vide — toute chaîne non vide est truthy, y compris \"0\" ou \"false\". Les vraies valeurs falsy sont : 0, \"\", null, undefined, NaN, et false lui-même."
       },
@@ -153,7 +153,7 @@ const MODULES = [
         concept: "types",
         code: `console.log(NaN === NaN);`,
         prompt: "Que va afficher ce code ?",
-        options: ["true", "false — NaN est la SEULE valeur JavaScript qui n'est jamais égale à elle-même, même avec ===", "undefined", "Erreur"],
+        options: ["true", "false : NaN n'est jamais égal à lui-même", "undefined", "Une erreur d'exécution"],
         correct: 1,
         explain: "NaN (\"Not a Number\") a la particularité unique de ne jamais être égal à lui-même, quelle que soit la comparaison. Pour tester si une valeur est NaN, il faut utiliser Number.isNaN(x), jamais x === NaN."
       },
@@ -163,8 +163,8 @@ const MODULES = [
         prompt: "Quelle est la différence entre ces deux conversions ?",
         options: [
           "Aucune, les deux renvoient 42",
-          "Number(\"42px\") renvoie NaN (la chaîne entière doit être un nombre valide), alors que parseInt(\"42px\") renvoie 42 (il s'arrête au premier caractère non numérique)",
-          "Les deux renvoient NaN",
+          "Number → NaN (chaîne entière invalide), parseInt → 42",
+          "Les deux renvoient la valeur NaN",
           "Number est plus permissif que parseInt"
         ],
         correct: 1,
@@ -205,9 +205,9 @@ const MODULES = [
         code: `function somme(...nombres) {\n  return nombres.reduce((a, b) => a + b, 0);\n}\nsomme(1, 2, 3, 4);`,
         prompt: "Que permet ...nombres dans cette signature de fonction ?",
         options: [
-          "C'est une erreur de syntaxe",
-          "Le rest parameter regroupe TOUS les arguments passés (peu importe leur nombre) dans un vrai tableau nombres",
-          "Il limite la fonction à exactement 3 arguments",
+          "C'est une erreur de syntaxe JavaScript",
+          "Le rest parameter regroupe tous les arguments dans un tableau",
+          "Il limite la fonction à exactement trois arguments",
           "Il transforme le premier argument en tableau"
         ],
         correct: 1,
@@ -217,7 +217,7 @@ const MODULES = [
         concept: "fonctions",
         code: `(function() {\n  console.log("Exécutée immédiatement");\n})();`,
         prompt: "Comment appelle-t-on ce patron d'écriture (une fonction définie ET appelée en une seule expression) ?",
-        options: ["Une closure", "Une IIFE (Immediately Invoked Function Expression) — s'exécute une seule fois, dès sa définition, sans polluer l'espace de noms englobant", "Une fonction générique", "Un callback"],
+        options: ["Une simple closure", "Une IIFE, exécutée une fois dès sa définition", "Une fonction générique réutilisable", "Un callback classique"],
         correct: 1,
         explain: "L'IIFE encapsule du code dans son propre scope, exécuté immédiatement une seule fois — historiquement utilisée pour éviter de polluer l'espace global avant l'arrivée des modules ES6, encore utile pour isoler un bloc d'initialisation."
       },
@@ -227,7 +227,7 @@ const MODULES = [
         prompt: "Pourquoi ce code fonctionne-t-il, alors que salut() est appelée AVANT sa déclaration dans le fichier ?",
         options: [
           "C'est une erreur qui devrait planter",
-          "Les déclarations de fonction (function salut() {...}) sont entièrement hoistées — corps compris — contrairement aux fonctions fléchées ou aux var, qui ne hoistent que le nom",
+          "Une déclaration de fonction est hoistée avec son corps entier",
           "JavaScript exécute le fichier de bas en haut",
           "Ça ne fonctionne qu'en mode non-strict"
         ],
@@ -261,8 +261,8 @@ const MODULES = [
         prompt: "Pourquoi faut-il se méfier de .sort() sans argument sur un tableau de NOMBRES ?",
         options: [
           "sort() ne fonctionne que sur des chaînes",
-          "Par défaut, sort() compare les éléments comme des CHAÎNES : [10, 2, 1].sort() donnerait [1, 10, 2] (ordre lexicographique), pas [1, 2, 10] (ordre numérique)",
-          "sort() modifie une copie, jamais le tableau original",
+          "Par défaut, sort() compare comme des chaînes : [10,2,1] → [1,10,2]",
+          "sort() modifie une copie, jamais l'original",
           "sort() lève toujours une erreur sur des nombres"
         ],
         correct: 1,
@@ -274,9 +274,9 @@ const MODULES = [
         prompt: "Pourquoi ces deux méthodes se comportent-elles différemment face à NaN ?",
         options: [
           "Elles se comportent de façon identique",
-          "indexOf utilise === (donc NaN !== NaN, il ne le trouve jamais), alors qu'includes utilise un algorithme spécial qui détecte correctement NaN",
+          "indexOf utilise === (rate NaN) ; includes le détecte bien",
           "indexOf ne fonctionne qu'avec des chaînes",
-          "includes est toujours plus lent"
+          "includes est toujours plus lent qu'indexOf"
         ],
         correct: 1,
         explain: "indexOf compare avec === (égalité stricte), sous laquelle NaN n'est jamais égal à lui-même — il est donc introuvable via indexOf. includes() a été spécifiquement conçu pour corriger ce piège et détecte NaN correctement."
@@ -285,7 +285,7 @@ const MODULES = [
         concept: "tableaux",
         code: `const imbrique = [1, [2, 3], [4, [5, 6]]];\nconst plat = imbrique.flat();`,
         prompt: "Que vaut plat après ce code ?",
-        options: ["[1, 2, 3, 4, 5, 6]", "[1, 2, 3, 4, [5, 6]] — flat() sans argument n'aplatit qu'UN SEUL niveau de profondeur par défaut", "[1, [2, 3], [4, [5, 6]]]", "Erreur, flat() n'existe pas"],
+        options: ["[1, 2, 3, 4, 5, 6]", "[1, 2, 3, 4, [5, 6]] : flat() n'aplatit qu'un niveau", "[1, [2, 3], [4, [5, 6]]]", "Erreur : flat() n'existe pas"],
         correct: 1,
         explain: "flat() aplatit un seul niveau par défaut (équivalent à flat(1)). Pour tout aplatir quelle que soit la profondeur, il faut flat(Infinity) — sinon [5, 6] reste imbriqué dans ce cas."
       },
@@ -321,7 +321,7 @@ const MODULES = [
         concept: "objets",
         code: `const utilisateur = { nom: "Léa" };\nObject.freeze(utilisateur);\nutilisateur.nom = "Marc";\nconsole.log(utilisateur.nom);`,
         prompt: "Que va afficher ce code ?",
-        options: ["\"Marc\"", "\"Léa\" — Object.freeze empêche toute modification de l'objet", "undefined", "Erreur de syntaxe"],
+        options: ["\"Marc\"", "\"Léa\" : Object.freeze bloque toute modification", "undefined", "Une erreur de syntaxe"],
         correct: 1,
         explain: "Object.freeze() rend un objet immuable : ses propriétés existantes ne peuvent plus être modifiées, ajoutées ou supprimées. L'affectation utilisateur.nom = \"Marc\" échoue silencieusement (ou lève une TypeError en mode strict), donc nom reste \"Léa\"."
       },
@@ -338,8 +338,8 @@ const MODULES = [
         prompt: "Que permet Object.entries(prix) combiné à un destructuring dans for...of ?",
         options: [
           "C'est une erreur de syntaxe",
-          "Itérer sur les paires [clé, valeur] de l'objet, en les destructurant directement en deux variables lisibles (fruit, valeur) à chaque itération",
-          "Object.entries ne fonctionne que sur les tableaux",
+          "Itérer sur les paires [clé, valeur], destructurées à chaque tour",
+          "Object.entries ne marche que sur les tableaux",
           "Cela trie automatiquement les propriétés"
         ],
         correct: 1,
@@ -351,7 +351,7 @@ const MODULES = [
         prompt: "Que permettent les crochets autour de cle dans la définition de l'objet ({ [cle]: ... }) ?",
         options: [
           "C'est une erreur de syntaxe",
-          "Un \"computed property name\" : le nom de la propriété est calculé dynamiquement à partir de la variable cle (\"statut\"), plutôt que d'être un nom littéral fixe",
+          "Un « computed property name » : nom calculé depuis la variable cle",
           "Ça crée un tableau au lieu d'un objet",
           "cle devient une méthode de l'objet"
         ],
@@ -371,8 +371,8 @@ const MODULES = [
         prompt: "Quelle est la différence essentielle entre for...of et for...in sur un tableau ?",
         options: [
           "Aucune différence, ce sont des synonymes",
-          "for...of itère sur les VALEURS des éléments, for...in itère sur les INDICES (en tant que chaînes)",
-          "for...in ne fonctionne que sur les tableaux, for...of que sur les objets",
+          "for...of donne les valeurs, for...in donne les indices",
+          "for...in ne marche que sur les tableaux, for...of sur les objets",
           "for...of ne fonctionne pas avec les tableaux"
         ],
         correct: 1,
@@ -406,7 +406,7 @@ const MODULES = [
         concept: "boucles",
         code: `let i = 10;\ndo {\n  console.log(i);\n  i++;\n} while (i < 5);`,
         prompt: "Combien de fois console.log(i) s'exécute-t-il ?",
-        options: ["0 fois", "1 fois — un do...while exécute TOUJOURS son corps au moins une fois, AVANT de vérifier la condition", "5 fois", "Boucle infinie"],
+        options: ["0 fois", "1 fois : le corps s'exécute toujours au moins une fois", "5 fois", "Une boucle infinie"],
         correct: 1,
         explain: "Contrairement à while (qui vérifie la condition AVANT chaque itération), do...while exécute le corps une première fois inconditionnellement, puis vérifie la condition. Ici i=10 n'est jamais < 5, mais le premier passage a déjà eu lieu."
       },
@@ -421,8 +421,8 @@ const MODULES = [
         concept: "conditions",
         prompt: "Quelle est la vraie différence entre l'opérateur || et l'opérateur ?? (nullish coalescing) ?",
         options: [
-          "Aucune différence",
-          "|| bascule sur toute valeur \"falsy\" (0, \"\", false, null, undefined), alors que ?? ne bascule QUE si la valeur est null ou undefined",
+          "Aucune différence entre les deux",
+          "|| bascule sur tout falsy ; ?? seulement sur null/undefined",
           "?? est plus rapide à l'exécution",
           "|| ne fonctionne qu'avec des booléens"
         ],
@@ -434,9 +434,9 @@ const MODULES = [
         code: `function statut(age) {\n  return age >= 18 ? "majeur" : "mineur";\n}`,
         prompt: "Que fait l'opérateur ternaire (condition ? a : b) dans cette fonction ?",
         options: [
-          "C'est un raccourci pour if/else qui RENVOIE directement une des deux valeurs selon la condition",
+          "Un if/else qui renvoie directement une des deux valeurs",
           "Il exécute les deux branches à chaque appel",
-          "C'est une erreur de syntaxe en dehors d'une classe",
+          "Une erreur de syntaxe en dehors d'une classe",
           "Il ne fonctionne qu'avec des nombres"
         ],
         correct: 0,
@@ -448,9 +448,9 @@ const MODULES = [
         prompt: "Que fait l'enchaînement de deux case sans instruction entre eux (case \"pomme\": case \"poire\":) ?",
         options: [
           "C'est une erreur de syntaxe",
-          "Les deux valeurs partagent le même traitement (\"fall-through\" intentionnel) : \"pomme\" ET \"poire\" affichent \"Pomacée\"",
-          "Seul \"poire\" déclenche le code, \"pomme\" ne fait rien",
-          "Les deux cases s'exécutent l'un après l'autre systématiquement"
+          "Les deux valeurs partagent le même traitement (« fall-through »)",
+          "Seul « poire » déclenche le code, pas « pomme »",
+          "Les deux cases s'exécutent toujours l'un après l'autre"
         ],
         correct: 1,
         explain: "Sans break entre deux case, l'exécution \"tombe\" (fall-through) au suivant. C'est une technique volontaire pour regrouper plusieurs valeurs sous le même traitement, ici pomme et poire partagent \"Pomacée\"."
@@ -459,10 +459,10 @@ const MODULES = [
         concept: "conditions",
         prompt: "Pourquoi if (utilisateur.age > 18) peut-il planter si utilisateur vaut null ?",
         options: [
-          "Ça ne plante jamais",
-          "Lire .age sur null (ou undefined) lève une TypeError — il faut vérifier utilisateur avant, ou utiliser utilisateur?.age",
-          "JavaScript convertit automatiquement null en objet vide",
-          "Seul === peut comparer null"
+          "Ça ne plante jamais réellement",
+          "Lire .age sur null lève une TypeError (utiliser ?.age)",
+          "JavaScript convertit null en objet vide",
+          "Seul === peut comparer avec null"
         ],
         correct: 1,
         explain: "null et undefined n'ont aucune propriété : tenter d'accéder à .age dessus lève une TypeError à l'exécution. C'est exactement le problème que l'optional chaining (utilisateur?.age) résout proprement."
@@ -471,7 +471,7 @@ const MODULES = [
         concept: "conditions",
         code: `if ([]) {\n  console.log("Vrai !");\n} else {\n  console.log("Faux !");\n}`,
         prompt: "Que va afficher ce code ?",
-        options: ["Faux !", "Vrai ! — un tableau vide [] est un OBJET, et TOUS les objets (même vides) sont truthy en JavaScript", "Erreur", "Ça dépend du navigateur"],
+        options: ["Faux !", "Vrai ! : un tableau vide est un objet, donc truthy", "Une erreur d'exécution", "Ça dépend du navigateur"],
         correct: 1,
         explain: "Seules les valeurs falsy précises (0, \"\", null, undefined, NaN, false) convertissent en false. Un tableau vide reste un objet — et TOUT objet, même vide ou sans propriétés, est truthy. C'est une source fréquente de bugs pour qui vient d'autres langages."
       },
@@ -481,9 +481,9 @@ const MODULES = [
         prompt: "Que fait l'opérateur && utilisé ici, en dehors d'un if classique ?",
         options: [
           "C'est une erreur de syntaxe",
-          "Le \"court-circuit logique\" : si la première expression est falsy, la seconde n'est même pas évaluée — utilisé ici pour n'exécuter console.log QUE si estConnecte est vrai, sans écrire de if",
-          "Ça compare les deux valeurs",
-          "Ça fonctionne uniquement avec des booléens stricts"
+          "Court-circuit : la 2nde expression n'est évaluée que si la 1re est vraie",
+          "Ça compare simplement les deux valeurs",
+          "Ça ne marche qu'avec des booléens stricts"
         ],
         correct: 1,
         explain: "&& s'arrête dès que le premier opérande est falsy. condition && action() est un raccourci courant pour \"si condition, alors action\", équivalent compact à if (condition) { action(); }."
@@ -611,7 +611,7 @@ const MODULES = [
         concept: "destructuring",
         code: `let a = 1, b = 2;\n[a, b] = [b, a];\nconsole.log(a, b);`,
         prompt: "Que va afficher ce code ?",
-        options: ["1 2", "2 1 — le destructuring de tableau permet d'échanger deux variables en une seule ligne, sans variable temporaire", "Erreur de syntaxe", "undefined undefined"],
+        options: ["1 2", "2 1", "Erreur de syntaxe", "undefined undefined"],
         correct: 1,
         explain: "[a, b] = [b, a] construit d'abord le tableau de droite [b, a] avec les valeurs ACTUELLES, puis le destructure dans a et b — un idiome classique pour échanger deux valeurs sans variable temporaire intermédiaire."
       },
@@ -621,11 +621,11 @@ const MODULES = [
         prompt: "Pourquoi renvoyer un OBJET plutôt qu'un tableau, quand une fonction doit renvoyer plusieurs valeurs ?",
         options: [
           "Un objet est toujours plus rapide qu'un tableau",
-          "Nommer les valeurs (min, max) rend l'appel auto-documenté, et l'ORDRE de destructuring n'a plus d'importance — contrairement à un tableau où l'appelant doit se souvenir de la position de chaque valeur",
-          "Un tableau ne peut contenir que 2 éléments",
+          "Un tableau ne peut contenir que deux éléments",
+          "Les valeurs sont nommées : l'ordre de destructuring n'importe plus",
           "C'est purement une question de goût, aucune différence"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Avec return [min, max], l'appelant doit retenir que le premier élément est le minimum et le second le maximum. Avec un objet destructuré { min, max }, chaque valeur est nommée explicitement à l'appel — plus lisible et plus robuste aux évolutions futures de la fonction."
       },
       {
@@ -653,10 +653,10 @@ const MODULES = [
         code: `const counts = ["a", "b", "a", "c", "b", "a"].reduce((acc, mot) => {\n  acc[mot] = (acc[mot] || 0) + 1;\n  return acc;\n}, {});`,
         prompt: "Que permet ce reduce, au-delà de simplement additionner des nombres ?",
         options: [
-          "Rien, reduce ne fonctionne qu'avec des nombres",
-          "Accumuler dans une structure quelconque (ici un objet de comptage) — la valeur initiale et le type accumulé peuvent être n'importe quoi, pas seulement un nombre",
-          "Trier le tableau par ordre alphabétique",
-          "C'est une erreur : reduce doit toujours renvoyer un tableau"
+          "Rien : reduce ne fonctionne qu'avec des nombres",
+          "Accumuler dans n'importe quelle structure (ici un objet de comptage)",
+          "Trier le tableau par ordre alphabétique croissant",
+          "Une erreur : reduce doit toujours renvoyer un tableau"
         ],
         correct: 1,
         explain: "L'accumulateur de reduce peut être de n'importe quel type — ici un objet — ce qui permet de construire des structures complexes (comptage, regroupement, transformation) en un seul passage, pas seulement des sommes numériques."
@@ -666,12 +666,12 @@ const MODULES = [
         code: `const nombres = [1, 2, 3, 4, 5];\nconst max = nombres.reduce((a, b) => a > b ? a : b);`,
         prompt: "Que se passe-t-il si on omet la valeur initiale de reduce, comme ici ?",
         options: [
-          "Erreur obligatoire, la valeur initiale est requise",
-          "reduce utilise le PREMIER élément du tableau comme valeur initiale, et commence l'accumulation à partir du deuxième élément",
-          "acc démarre automatiquement à 0",
-          "Le tableau est traité comme vide"
+          "Erreur : la valeur initiale est toujours requise",
+          "L'accumulateur démarre automatiquement à zéro",
+          "Le tableau entier est alors traité comme vide",
+          "reduce prend le premier élément comme valeur initiale"
         ],
-        correct: 1,
+        correct: 3,
         explain: "Sans valeur initiale explicite, reduce prend le premier élément (1) comme point de départ de acc, et applique la fonction à partir du second élément (2). Ici ça calcule bien le maximum, mais sur un tableau VIDE ça lèverait une TypeError — d'où l'intérêt de toujours fournir une valeur initiale en pratique."
       },
       {
@@ -688,9 +688,9 @@ const MODULES = [
         prompt: "En quoi reduceRight diffère-t-il de reduce ?",
         options: [
           "Aucune différence, ce sont des synonymes",
-          "reduceRight parcourt le tableau de DROITE À GAUCHE (donc ici le résultat est \"cba\", pas \"abc\") — utile quand l'ordre d'accumulation compte",
+          "Il parcourt de droite à gauche (ici le résultat est « cba »)",
           "reduceRight ne fonctionne que sur des nombres",
-          "reduceRight est deux fois plus rapide"
+          "reduceRight est environ deux fois plus rapide"
         ],
         correct: 1,
         explain: "reduce parcourt de gauche à droite, reduceRight de droite à gauche — même logique d'accumulation, mais ordre de traitement inversé. Sur des opérations non commutatives (concaténation de texte, composition de fonctions), le résultat diffère réellement."
@@ -700,22 +700,22 @@ const MODULES = [
         code: `const gens = [{ nom: "Ana", ville: "Paris" }, { nom: "Bo", ville: "Lyon" }, { nom: "Cid", ville: "Paris" }];\nconst parVille = gens.reduce((acc, p) => {\n  (acc[p.ville] ??= []).push(p.nom);\n  return acc;\n}, {});`,
         prompt: "Que réalise ce reduce, conceptuellement ?",
         options: [
-          "Un tri alphabétique par nom",
-          "Un regroupement (\"group by\") : il construit un objet où chaque clé est une ville, associée au tableau des noms des personnes qui y habitent",
-          "Un simple comptage du nombre de personnes",
-          "Une erreur : reduce ne peut pas produire un objet imbriqué"
+          "Un regroupement « group by » : par ville → noms des habitants",
+          "Un tri alphabétique des personnes par nom",
+          "Un simple comptage du nombre total de personnes",
+          "Une erreur : reduce ne peut pas produire d'objet"
         ],
-        correct: 1,
+        correct: 0,
         explain: "acc[p.ville] ??= [] crée un tableau vide la première fois qu'une ville est rencontrée, puis .push(p.nom) y ajoute le nom — reduce construit ainsi progressivement un regroupement par ville, un usage très courant au-delà des simples sommes."
       },
       {
         concept: "prototypes",
         prompt: "En JavaScript, comment un objet hérite-t-il des méthodes d'un autre, fondamentalement ?",
         options: [
-          "Via une copie complète de toutes les méthodes à la création",
-          "Via une chaîne de prototypes : si une propriété n'est pas trouvée sur l'objet lui-même, JavaScript la cherche sur son prototype, puis le prototype du prototype, etc.",
-          "JavaScript ne supporte pas l'héritage",
-          "Uniquement via les classes ES6, aucun autre mécanisme n'existe"
+          "Via une copie complète des méthodes à la création",
+          "Via la chaîne de prototypes : la recherche remonte jusqu'à trouver",
+          "JavaScript ne supporte pas vraiment l'héritage",
+          "Uniquement via les classes ES6, rien d'autre n'existe"
         ],
         correct: 1,
         explain: "Le prototype est le mécanisme d'héritage NATIF de JavaScript — la \"chaîne de prototypes\". class et extends (ES6) ne sont que du sucre syntaxique par-dessus ce même mécanisme, qui existait bien avant."
@@ -725,12 +725,12 @@ const MODULES = [
         code: `class Animal {\n  parler() { return "..."; }\n}\nclass Chien extends Animal {\n  parler() { return "Wouf"; }\n}`,
         prompt: "Que représente extends Animal dans cette classe Chien ?",
         options: [
-          "Chien copie le code d'Animal une seule fois à la création",
-          "Chien place Animal.prototype dans sa propre chaîne de prototypes : Chien hérite de ses méthodes, et peut les redéfinir (comme parler ici)",
+          "Chien copie le code d'Animal une fois à la création",
           "C'est purement décoratif, sans effet sur le comportement",
-          "Ça rend Animal inutilisable seul après"
+          "Animal.prototype entre dans la chaîne de Chien (méthodes héritées)",
+          "Ça rend Animal inutilisable seul par la suite"
         ],
-        correct: 1,
+        correct: 2,
         explain: "extends connecte les prototypes : les instances de Chien peuvent utiliser les méthodes d'Animal.prototype si elles ne les redéfinissent pas elles-mêmes. Ici, parler est redéfinie (override) dans Chien, donc c'est la version de Chien qui est utilisée."
       },
       {
@@ -744,7 +744,7 @@ const MODULES = [
         concept: "prototypes",
         code: `function Personne(nom) {\n  this.nom = nom;\n}\nPersonne.prototype.saluer = function() {\n  return \`Salut, \${this.nom}\`;\n};\nconst a = new Personne("Ana");\nconst b = new Personne("Bo");`,
         prompt: "Combien de copies de la fonction saluer existent en mémoire, entre a et b ?",
-        options: ["2 (une par instance)", "1 seule, partagée via Personne.prototype — a et b y accèdent par la chaîne de prototypes", "0, saluer n'existe pas vraiment", "Autant que d'appels à saluer()"],
+        options: ["2, une par instance", "1 seule, partagée via le prototype", "0, saluer n'existe pas vraiment", "Autant que d'appels à saluer()"],
         correct: 1,
         explain: "Mettre une méthode sur le prototype (plutôt que dans le constructeur avec this.saluer = ...) crée UNE SEULE copie, partagée par toutes les instances via la chaîne de prototypes — bien plus économe en mémoire que de redéfinir la méthode pour chaque objet."
       },
@@ -752,8 +752,8 @@ const MODULES = [
         concept: "prototypes",
         prompt: "Quelle est la relation entre new MaClasse() et le prototype, fondamentalement ?",
         options: [
-          "new copie manuellement toutes les méthodes de la classe dans l'objet créé",
-          "new crée un nouvel objet dont le prototype interne pointe vers MaClasse.prototype, permettant l'accès aux méthodes sans les dupliquer",
+          "new copie manuellement les méthodes dans l'objet créé",
+          "new relie le prototype interne de l'objet à MaClasse.prototype",
           "new n'a aucun rapport avec les prototypes",
           "new fonctionne différemment pour class et function"
         ],
@@ -766,11 +766,11 @@ const MODULES = [
         prompt: "Que fait Object.create(animal) ici ?",
         options: [
           "Copie toutes les propriétés d'animal dans un nouvel objet",
-          "Crée un nouvel objet dont le PROTOTYPE est directement animal, sans passer par une fonction constructeur ni une classe",
           "C'est un équivalent de JSON.parse(JSON.stringify(animal))",
-          "Ça modifie animal directement"
+          "Ça modifie l'objet animal directement en place",
+          "Crée un objet dont le prototype est directement animal"
         ],
-        correct: 1,
+        correct: 3,
         explain: "Object.create(proto) crée un objet vide dont le prototype est explicitement proto, sans passer par new ni un constructeur. C'est la façon la plus directe et explicite de construire une chaîne de prototypes, utile pour comprendre le mécanisme sans le sucre syntaxique de class."
       },
       {
@@ -778,10 +778,10 @@ const MODULES = [
         code: `class A { methode() { return "A"; } }\nclass B extends A {}\nclass C extends B {}\nconst c = new C();\nconsole.log(c.methode());`,
         prompt: "Comment c.methode() trouve-t-elle sa réponse, alors que methode n'est définie ni sur C ni sur B ?",
         options: [
-          "Erreur, methode n'existe pas sur c",
-          "JavaScript remonte la chaîne de prototypes : C.prototype (rien) → B.prototype (rien) → A.prototype (trouvé !) — la recherche continue jusqu'à trouver la propriété",
+          "Erreur : methode n'existe pas sur c",
+          "JS remonte la chaîne de prototypes : C → B → A.prototype (trouvé)",
           "methode est automatiquement copiée dans chaque classe",
-          "Il faut redéfinir methode dans chaque classe"
+          "Il faut redéfinir methode dans chacune des classes"
         ],
         correct: 1,
         explain: "La résolution d'une propriété suit la chaîne de prototypes vers le haut jusqu'à la trouver. Ici, chaque extends ajoute un maillon à la chaîne, et methode() est trouvée tout en haut, sur A.prototype — l'héritage multi-niveaux fonctionne par cette remontée successive."
@@ -799,10 +799,10 @@ const MODULES = [
         code: `for (var i = 0; i < 3; i++) {\n  setTimeout(() => console.log(i), 0);\n}`,
         prompt: "Pourquoi ce code affiche-t-il 3, 3, 3 plutôt que 0, 1, 2 ?",
         options: [
-          "setTimeout ne fonctionne pas avec les boucles",
-          "var n'a pas de portée de bloc : les trois callbacks partagent la MÊME variable i, qui vaut 3 à la fin de la boucle",
-          "console.log est asynchrone",
-          "C'est un bug du moteur JavaScript"
+          "setTimeout ne fonctionne pas dans une boucle",
+          "var n'a pas de portée de bloc : un seul i partagé, valant 3",
+          "console.log est en réalité asynchrone ici",
+          "C'est un bug du moteur JavaScript lui-même"
         ],
         correct: 1,
         explain: "var ignore les blocs et n'a qu'UNE seule instance de i pour toute la boucle. Les trois closures capturent cette même variable, lue seulement quand setTimeout s'exécute (après la boucle), où i vaut déjà 3. Remplacer var par let créerait une nouvelle i à chaque itération, capturée séparément par chaque closure."
@@ -812,11 +812,11 @@ const MODULES = [
         prompt: "À quoi sert une closure pour créer des données \"privées\" en JavaScript ?",
         options: [
           "Une closure ne peut pas créer de données privées",
-          "Une fonction interne garde accès aux variables de sa fonction englobante même après que celle-ci ait fini de s'exécuter, sans les exposer directement à l'extérieur",
           "Il faut obligatoirement une classe avec des champs private",
+          "La fonction interne garde accès aux variables englobantes, non exposées",
           "Les closures sont automatiquement en lecture seule"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Une variable déclarée dans une fonction n'est accessible que par les fonctions définies à l'intérieur (via la closure). Rien à l'extérieur ne peut y accéder directement — c'est le mécanisme le plus ancien d'encapsulation en JavaScript, avant même les champs privés des classes (#champ)."
       },
       {
@@ -831,10 +831,10 @@ const MODULES = [
         concept: "closures",
         prompt: "Pourquoi dit-on qu'une closure peut créer une fuite mémoire si on n'y prend pas garde ?",
         options: [
-          "Les closures sont automatiquement supprimées après 1 seconde",
-          "Tant qu'une closure existe (référencée quelque part), les variables qu'elle capture restent en mémoire — un event listener oublié peut ainsi retenir tout un contexte inutile",
-          "Les closures ne peuvent jamais être garbage collected",
-          "Ce n'est jamais un problème réel"
+          "Les closures sont supprimées après une seconde",
+          "Les variables capturées restent en mémoire tant que la closure vit",
+          "Une closure ne peut jamais être garbage collected",
+          "Ce n'est en réalité jamais un problème concret"
         ],
         correct: 1,
         explain: "Le garbage collector ne peut libérer une variable capturée par une closure que si PLUS RIEN ne référence cette closure. Un callback ou event listener oublié (jamais retiré) garde donc en vie tout son environnement capturé, même inutile — source classique de fuite mémoire."
@@ -844,12 +844,12 @@ const MODULES = [
         code: `const compteurModule = (function() {\n  let compte = 0;\n  return { increment: () => ++compte, valeur: () => compte };\n})();`,
         prompt: "Quel patron de conception cette IIFE combinée à une closure met-elle en œuvre ?",
         options: [
-          "Le patron Observer",
-          "Le \"module pattern\" : une IIFE crée un scope privé pour compte, et n'expose que les méthodes choisies — compte lui-même reste totalement inaccessible de l'extérieur",
-          "Le patron Singleton, obligatoirement",
-          "Ça n'a pas de nom particulier"
+          "Le patron Observer, classiquement",
+          "Le patron Singleton, forcément et sans exception",
+          "Ça n'a pas de nom particulier reconnu",
+          "Le « module pattern » : scope privé, seules les méthodes exposées"
         ],
-        correct: 1,
+        correct: 3,
         explain: "Le module pattern combine IIFE (scope isolé exécuté une fois) et closure (les méthodes retournées gardent accès à compte) pour simuler une vraie encapsulation en JavaScript — avant même l'existence des champs privés de classe (#compte)."
       },
       {
@@ -857,10 +857,10 @@ const MODULES = [
         code: `for (let i = 0; i < 3; i++) {\n  setTimeout(() => console.log(i), 0);\n}`,
         prompt: "Pourquoi ce code (avec let, contrairement à la version avec var) affiche-t-il bien 0, 1, 2 ?",
         options: [
-          "let est plus rapide que var",
-          "let crée une NOUVELLE liaison de i à CHAQUE itération de la boucle — chaque closure capture donc sa propre copie de i, indépendante des autres",
-          "setTimeout se comporte différemment avec let",
-          "Ce n'est en fait pas garanti, le résultat est aléatoire"
+          "let est simplement plus rapide que var",
+          "let crée une nouvelle liaison de i à chaque itération",
+          "setTimeout se comporte autrement avec let",
+          "Ce n'est pas garanti, le résultat est aléatoire"
         ],
         correct: 1,
         explain: "Contrairement à var (une seule variable partagée pour toute la boucle), let a un comportement spécial dans les boucles for : une nouvelle instance de la variable est créée à chaque tour, et c'est CETTE instance que chaque closure capture — d'où 0, 1, 2 au lieu de 3, 3, 3."
@@ -869,10 +869,10 @@ const MODULES = [
         concept: "this",
         prompt: "Dans une méthode d'objet, quelle est la valeur de this dans une fonction fléchée définie à l'intérieur ?",
         options: [
-          "L'objet courant, toujours",
-          "undefined, toujours",
-          "Celui du contexte englobant (this lexical, capturé au moment de la définition)",
-          "L'objet global window, toujours"
+          "L'objet courant sur lequel tourne la méthode",
+          "undefined, systématiquement et sans exception",
+          "Celui du contexte englobant (this lexical)",
+          "L'objet global window, dans tous les cas"
         ],
         correct: 2,
         explain: "Les arrow functions n'ont pas leur propre this : elles utilisent celui de leur environnement de définition. C'est différent d'une fonction classique, dont le this dépend de la façon dont elle est appelée."
@@ -882,10 +882,10 @@ const MODULES = [
         code: `const obj = {\n  nom: "Ada",\n  saluer: function() {\n    console.log(this.nom);\n  }\n};\nconst fn = obj.saluer;\nfn();`,
         prompt: "Que va afficher ce code ?",
         options: [
-          "\"Ada\"",
+          "\"Ada\", le nom porté par l'objet",
           "undefined (ou une erreur en mode strict)",
-          "null",
-          "\"this\""
+          "null, faute de contexte lié",
+          "La chaîne littérale \"this\""
         ],
         correct: 1,
         explain: "this dépend de la façon dont une fonction est APPELÉE, pas de l'endroit où elle est définie. En extrayant saluer dans fn puis en l'appelant seule (fn()), this n'est plus lié à obj — il vaut undefined en mode strict (ou l'objet global sinon), donc this.nom échoue."
@@ -902,10 +902,10 @@ const MODULES = [
         code: `class Bouton {\n  constructor() {\n    this.compteur = 0;\n    this.gererClic = this.gererClic.bind(this);\n  }\n  gererClic() {\n    this.compteur++;\n  }\n}`,
         prompt: "Pourquoi lie-t-on gererClic à this dans le constructeur ?",
         options: [
-          "C'est purement décoratif",
-          "Sans ce bind, si gererClic est passée comme callback puis appelée seule, this ne pointerait plus vers l'instance — bind fige définitivement this",
-          "bind rend la méthode plus rapide",
-          "C'est obligatoire pour toutes les méthodes de classe, sans exception"
+          "C'est purement décoratif, sans effet réel",
+          "Sans bind, passée en callback, this ne pointerait plus vers l'instance",
+          "bind rend simplement la méthode plus rapide",
+          "C'est obligatoire pour toute méthode de classe"
         ],
         correct: 1,
         explain: "Une méthode de classe passée en callback (ex: addEventListener('click', instance.gererClic)) perd son lien avec l'instance : appelée seule, this vaudrait undefined. bind(this) dans le constructeur crée une version de la méthode dont le this est figé une fois pour toutes sur l'instance."
@@ -915,12 +915,12 @@ const MODULES = [
         code: `const equipe = {\n  membres: ["Ana", "Bo"],\n  afficher: function() {\n    this.membres.forEach(function(m) {\n      console.log(this.nom, m);\n    });\n  }\n};`,
         prompt: "Pourquoi this.nom est-il undefined à l'intérieur du callback de forEach ici ?",
         options: [
-          "equipe n'a pas de propriété nom, c'est normal (mais this lui-même pointe bien vers equipe)",
-          "La fonction classique passée à forEach a SON PROPRE this, différent de celui de afficher — remplacer function(m) par une arrow function résoudrait le problème en capturant le this englobant",
-          "forEach ne supporte pas this",
+          "La fonction classique de forEach a son propre this (≠ afficher)",
+          "equipe n'a pas de propriété nom (mais this pointe bien equipe)",
+          "forEach ne supporte tout simplement pas this",
           "Il faut toujours utiliser var pour que this fonctionne"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Une fonction classique (function) définit son propre this selon la façon dont ELLE est appelée — ici par forEach, pas par equipe. Une arrow function n'a pas son propre this : elle capturerait celui de afficher (donc equipe), résolvant le problème."
       },
       {
@@ -928,10 +928,10 @@ const MODULES = [
         code: `const minuteur = {\n  secondes: 0,\n  demarrer: function() {\n    setTimeout(function() {\n      this.secondes++;\n      console.log(this.secondes);\n    }, 1000);\n  }\n};`,
         prompt: "Pourquoi this.secondes++ échoue-t-il (ou ne fait pas ce qu'on attend) dans ce code ?",
         options: [
-          "setTimeout ne peut pas contenir de this",
-          "La fonction classique passée à setTimeout est appelée par setTimeout lui-même (pas par minuteur), donc son this ne pointe pas vers minuteur — une arrow function résoudrait le problème",
-          "secondes n'est pas une propriété valide",
-          "Il faut obligatoirement une classe pour utiliser this"
+          "setTimeout ne peut pas contenir de this du tout",
+          "Le callback est appelé par setTimeout, pas par minuteur",
+          "secondes n'est pas une propriété valide ici",
+          "Il faut forcément une classe pour utiliser this"
         ],
         correct: 1,
         explain: "Le this d'une fonction classique dépend de QUI l'appelle. setTimeout appelle son callback sans contexte particulier — remplacer function() par () => résoudrait le problème, l'arrow function capturant le this englobant (donc minuteur)."
@@ -941,12 +941,12 @@ const MODULES = [
         code: `class Chronometre {\n  temps = 0;\n  tick = () => {\n    this.temps++;\n  }\n}`,
         prompt: "Pourquoi déclarer tick comme un champ de classe fléché plutôt qu'une méthode classique (tick() {...}) ?",
         options: [
-          "Aucune différence, c'est juste une préférence de style",
-          "Un champ fléché capture automatiquement le this de l'instance à la création, une fois pour toutes — équivalent à un bind(this) dans le constructeur, utile si tick est passée en callback ailleurs",
-          "tick devient statique avec cette syntaxe",
-          "Ça rend la méthode plus rapide à l'exécution"
+          "Aucune différence, c'est une préférence de style",
+          "tick devient une méthode statique avec cette syntaxe",
+          "Un champ fléché fige le this de l'instance (comme bind auto)",
+          "Ça rend simplement la méthode plus rapide"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Une méthode de classe classique perd son this si elle est extraite/passée en callback. Un champ de classe défini comme arrow function capture le this de l'instance dès sa création — le résultat équivaut à un bind(this) automatique, très pratique pour les gestionnaires d'événements React notamment."
       },
       {
@@ -986,9 +986,9 @@ const MODULES = [
         prompt: "Pourquoi préfère-t-on souvent les exports NOMMÉS aux exports par défaut dans un gros projet ?",
         options: [
           "Les exports nommés sont plus rapides à l'exécution",
-          "Ils forcent un nom cohérent à l'import (contrairement à un export default que chaque fichier peut importer sous un nom différent), et permettent un renommage/refactoring plus sûr avec les outils",
+          "Ils imposent un nom cohérent : refactoring plus sûr",
           "Les exports par défaut sont interdits en production",
-          "Aucune différence pratique"
+          "Aucune différence pratique entre les deux"
         ],
         correct: 1,
         explain: "Un export default peut être importé sous n'importe quel nom, ce qui peut créer des incohérences dans un projet. Les exports nommés imposent le nom exact déclaré, plus facile à tracer et à renommer automatiquement."
@@ -998,10 +998,10 @@ const MODULES = [
         code: `import { double as fois2 } from './utils.js';`,
         prompt: "Que permet le mot-clé as ici ?",
         options: [
-          "C'est une erreur de syntaxe",
-          "Renommer un import nommé au moment de l'import, ici double devient utilisable sous le nom fois2 dans ce fichier",
-          "Importer deux fois la même fonction",
-          "Convertir la fonction en type TypeScript"
+          "C'est une erreur de syntaxe d'import",
+          "Renommer un import nommé : double devient fois2 ici",
+          "Importer deux fois la même fonction d'un coup",
+          "Convertir la fonction en un type TypeScript"
         ],
         correct: 1,
         explain: "as permet de renommer localement un export nommé importé — utile pour éviter un conflit de nom avec une autre variable/import du même fichier, sans devoir changer le nom d'origine dans utils.js."
@@ -1011,12 +1011,12 @@ const MODULES = [
         code: `// index.js\nexport { double } from './math.js';\nexport { capitalize } from './string.js';`,
         prompt: "Quel patron ce fichier index.js met-il en œuvre, en ré-exportant depuis d'autres fichiers ?",
         options: [
-          "C'est une erreur, on ne peut pas ré-exporter",
-          "Un \"barrel export\" : ce fichier centralise et ré-expose les exports de plusieurs modules, permettant d'importer depuis un seul point d'entrée",
-          "Ça duplique physiquement le code de math.js et string.js",
+          "Un « barrel export » : un point d'entrée unique regroupant plusieurs modules",
+          "C'est une erreur : on ne peut pas ré-exporter",
+          "Ça duplique physiquement le code des fichiers",
           "Ça ne fonctionne qu'avec des exports par défaut"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Un barrel file regroupe les exports de plusieurs modules internes en un seul point d'entrée public, simplifiant les imports côté consommateur (un seul chemin à connaître au lieu de plusieurs fichiers internes)."
       },
       {
@@ -1024,9 +1024,9 @@ const MODULES = [
         code: `import './styles.css';\nimport './analytics-init.js';`,
         prompt: "Pourquoi importer un fichier sans récupérer aucune valeur (sans accolades ni nom après import) ?",
         options: [
-          "C'est une erreur de syntaxe",
-          "Un import \"pour effet de bord\" (side-effect import) : on ne veut aucune valeur exportée, juste que le CODE du module s'exécute (injecter des styles, initialiser un tracker)",
-          "Ça importe automatiquement tout le contenu sous un nom générique",
+          "C'est une erreur de syntaxe d'import",
+          "Un import « pour effet de bord » : exécuter le code, sans valeur",
+          "Ça importe tout le contenu sous un nom générique",
           "Ça ne fonctionne que pour les fichiers CSS"
         ],
         correct: 1,
@@ -1036,9 +1036,9 @@ const MODULES = [
         concept: "spread-rest",
         prompt: "Quelle est la vraie différence entre une copie \"shallow\" (superficielle) et \"deep\" (profonde) d'un objet ?",
         options: [
-          "Aucune différence concrète",
-          "La copie shallow ne duplique que le premier niveau ; les objets imbriqués restent des références partagées",
-          "La copie deep ne copie que les primitives",
+          "Aucune différence concrète entre les deux",
+          "La copie shallow ne duplique que le premier niveau (imbriqués partagés)",
+          "La copie deep ne copie que les valeurs primitives",
           "La copie shallow copie récursivement tous les niveaux"
         ],
         correct: 1,
@@ -1056,7 +1056,7 @@ const MODULES = [
         concept: "spread-rest",
         code: `const original = [1, 2, 3];\nconst copie = [...original];\ncopie.push(4);`,
         prompt: "Après ce code, que contient original ?",
-        options: ["[1, 2, 3, 4]", "[1, 2, 3] — copie est un NOUVEAU tableau, indépendant de original", "[4]", "Erreur"],
+        options: ["[1, 2, 3, 4]", "[1, 2, 3]", "[4]", "Erreur"],
         correct: 1,
         explain: "[...original] crée une copie superficielle : un nouveau tableau distinct en mémoire. Modifier copie (via push) n'affecte donc pas original, contrairement à const copie = original qui aurait créé une simple référence partagée."
       },
@@ -1065,10 +1065,10 @@ const MODULES = [
         code: `const notes = [12, 18, 9, 15];\nconst meilleure = Math.max(...notes);`,
         prompt: "Pourquoi utilise-t-on le spread ici, plutôt que Math.max(notes) directement ?",
         options: [
-          "Math.max(notes) fonctionnerait identiquement",
-          "Math.max attend des arguments SÉPARÉS, pas un tableau — le spread \"étale\" les éléments du tableau en arguments individuels pour satisfaire cette signature",
-          "Le spread trie le tableau avant de le passer",
-          "C'est purement stylistique"
+          "Math.max(notes) fonctionnerait de façon identique",
+          "Math.max attend des arguments séparés, pas un tableau",
+          "Le spread trie d'abord le tableau avant de le passer",
+          "C'est purement stylistique, sans réelle nécessité"
         ],
         correct: 1,
         explain: "Math.max(notes) recevrait un SEUL argument (le tableau lui-même), ce que Math.max ne sait pas interpréter (il renverrait NaN). ...notes déballe le tableau en arguments individuels au moment de l'appel, exactement ce que Math.max attend."
@@ -1077,7 +1077,7 @@ const MODULES = [
         concept: "spread-rest",
         code: `const mot = "Bonjour";\nconst lettres = [...mot];`,
         prompt: "Que vaut lettres après cette ligne ?",
-        options: ["\"Bonjour\" (inchangé)", "['B', 'o', 'n', 'j', 'o', 'u', 'r'] — le spread fonctionne sur toute valeur ITÉRABLE, pas seulement les tableaux", "Une erreur, le spread ne fonctionne pas sur les chaînes", "Un objet avec un index par lettre"],
+        options: ["\"Bonjour\", inchangé", "['B', 'o', 'n', 'j', 'o', 'u', 'r'] : le spread agit sur tout itérable", "Une erreur : le spread ignore les chaînes", "Un objet avec un index par lettre"],
         correct: 1,
         explain: "Le spread s'applique à tout ITÉRABLE (tableaux, chaînes, Map, Set, arguments...). Une chaîne étant itérable caractère par caractère, [...mot] produit un tableau de ses caractères individuels — une façon idiomatique de convertir une chaîne en tableau."
       },
@@ -1085,10 +1085,10 @@ const MODULES = [
         concept: "optional-chaining",
         prompt: "Que fait l'optional chaining ( ?. ), par exemple dans user?.address?.city ?",
         options: [
-          "Il lance une erreur si une propriété intermédiaire est absente",
-          "Il accède à la propriété, et renvoie undefined (sans erreur) si une référence intermédiaire est null ou undefined",
+          "Il lance une erreur si un maillon intermédiaire manque",
+          "Il renvoie undefined si une référence intermédiaire est null/undefined",
           "Il force la conversion du résultat en booléen",
-          "Il clone l'objet avant d'y accéder"
+          "Il clone l'objet avant d'y accéder en lecture"
         ],
         correct: 1,
         explain: "L'optional chaining permet de \"descendre\" dans une chaîne de propriétés en toute sécurité : si user ou user.address est null/undefined, l'expression s'arrête et renvoie undefined plutôt que de lever une erreur."
@@ -1098,10 +1098,10 @@ const MODULES = [
         code: `const ville = utilisateur?.adresse?.ville ?? "Inconnue";`,
         prompt: "Que se passe-t-il si utilisateur.adresse est undefined ?",
         options: [
-          "Une erreur est levée (Cannot read property 'ville' of undefined)",
-          "L'expression s'arrête à ce niveau et ville vaut undefined, puis ?? remplace cette valeur par \"Inconnue\"",
+          "Une erreur : Cannot read property 'ville' of undefined",
+          "L'expression s'arrête (undefined), puis ?? met « Inconnue »",
           "ville vaut automatiquement une chaîne vide",
-          "Le programme plante silencieusement"
+          "Le programme plante silencieusement au runtime"
         ],
         correct: 1,
         explain: "?. court-circuite dès qu'une référence intermédiaire est null/undefined, sans lever d'erreur — l'expression entière vaut alors undefined. L'opérateur ?? (nullish coalescing) prend ensuite le relais pour fournir \"Inconnue\" comme valeur de repli."
@@ -1111,10 +1111,10 @@ const MODULES = [
         code: `utilisateur?.envoyerMessage?.("Salut");`,
         prompt: "À quoi sert le ?. juste avant les parenthèses d'appel, dans envoyerMessage?.(\"Salut\") ?",
         options: [
-          "C'est une erreur de syntaxe",
-          "Il appelle la méthode seulement si envoyerMessage existe réellement (n'est ni null ni undefined) ; sinon l'expression entière vaut undefined sans planter",
+          "C'est une erreur de syntaxe JavaScript",
+          "Il n'appelle la méthode que si envoyerMessage existe",
           "Il force l'appel même si la méthode n'existe pas",
-          "Il transforme la méthode en Promise"
+          "Il transforme la méthode en une Promise"
         ],
         correct: 1,
         explain: "L'optional chaining s'applique aussi aux appels de fonction : ?.() n'exécute l'appel que si la référence avant n'est pas null/undefined. Utile quand une méthode n'est définie que conditionnellement (callback optionnel, API partiellement implémentée...)."
@@ -1123,7 +1123,7 @@ const MODULES = [
         concept: "optional-chaining",
         code: `const config = { options: { theme: "dark" } };\nconst couleur = config.options?.couleurs?.[0];`,
         prompt: "Que vaut couleur après cette ligne ?",
-        options: ["\"dark\"", "undefined — config.options existe, mais couleurs n'existe pas dessus, donc la chaîne s'arrête là", "Erreur", "null"],
+        options: ["\"dark\"", "undefined", "Erreur", "null"],
         correct: 1,
         explain: "L'optional chaining peut aussi s'appliquer à un accès par index ([0]). Ici config.options existe, mais .couleurs n'existe pas dessus : ?. court-circuite à ce niveau et couleur vaut undefined, sans erreur."
       },
@@ -1132,9 +1132,9 @@ const MODULES = [
         prompt: "Peut-on utiliser l'optional chaining à GAUCHE d'une affectation, comme utilisateur?.nom = \"Ana\" ?",
         options: [
           "Oui, c'est même l'usage recommandé",
-          "Non, c'est une erreur de syntaxe — l'optional chaining ne peut être utilisé qu'en LECTURE, jamais pour affecter une valeur",
+          "Non, erreur de syntaxe : ?. sert à lire, jamais à affecter",
           "Oui, mais uniquement avec des objets littéraux",
-          "Oui, ça équivaut à un if imbriqué"
+          "Oui, ça équivaut à un if imbriqué implicite"
         ],
         correct: 1,
         explain: "L'optional chaining est conçu uniquement pour la LECTURE sécurisée d'une valeur potentiellement absente — l'utiliser en cible d'affectation n'aurait pas de sens cohérent, et est explicitement interdit par la spécification."
@@ -1145,9 +1145,9 @@ const MODULES = [
         prompt: "Que se passe-t-il si la fonction obtenirUtilisateurs n'existe pas du tout (vaut undefined) ?",
         options: [
           "ReferenceError : obtenirUtilisateurs n'est pas définie",
-          "Si obtenirUtilisateurs est undefined, ?.() empêche l'appel de planter et l'expression vaut undefined, puis ?? fournit [] comme repli",
-          "utilisateurs vaut automatiquement null",
-          "C'est une erreur de syntaxe, on ne peut pas chaîner ?. et ??"
+          "?.() saute l'appel (undefined), puis ?? fournit []",
+          "utilisateurs vaut automatiquement la valeur null",
+          "Erreur : on ne peut pas chaîner ?. et ??"
         ],
         correct: 1,
         explain: "?.() est la version \"appel de fonction\" de l'optional chaining : si la référence avant est null/undefined, l'appel est simplement sauté (sans erreur), et l'expression vaut undefined — que ?? peut ensuite remplacer par une valeur de repli comme []."
@@ -1157,10 +1157,10 @@ const MODULES = [
         code: `const premiereNote = etudiant?.notes?.[0]?.valeur;`,
         prompt: "Combien de vérifications de sécurité (contre null/undefined) cette seule ligne effectue-t-elle ?",
         options: [
-          "Une seule, au début",
-          "Trois : etudiant peut être absent, etudiant.notes peut être absent, ET notes[0] peut lui-même être absent avant de lire .valeur — chaque ?. protège un niveau distinct",
-          "Aucune, ?. ne s'applique qu'une fois par expression",
-          "Une erreur, on ne peut chaîner que deux ?. maximum"
+          "Une seule vérification, au tout début",
+          "Trois : etudiant, etudiant.notes et notes[0] — un niveau par ?.",
+          "Aucune : ?. ne s'applique qu'une fois par expression",
+          "Erreur : deux ?. maximum par expression"
         ],
         correct: 1,
         explain: "Chaque ?. dans la chaîne protège indépendamment le niveau qui le précède. Ici, trois points de défaillance possibles sont couverts en une seule expression concise, chacun court-circuitant vers undefined dès qu'un maillon manque."
@@ -1213,10 +1213,10 @@ const MODULES = [
         code: `setTimeout(() => {\n  console.log("Bonjour");\n}, 1000);`,
         prompt: "Qu'est-ce que la fonction fléchée passée à setTimeout, dans ce code ?",
         options: [
-          "Un callback : une fonction passée en argument, que setTimeout appellera plus tard (ici, après 1000ms)",
-          "Une Promise",
-          "Un générateur",
-          "Une erreur de syntaxe"
+          "Un callback : une fonction appelée plus tard par setTimeout",
+          "Une Promise en attente de résolution",
+          "Un générateur de valeurs successives",
+          "Une erreur de syntaxe JavaScript"
         ],
         correct: 0,
         explain: "Un callback est simplement une fonction passée en argument à une autre fonction, pour être exécutée plus tard (souvent après un événement ou un délai). C'est le mécanisme asynchrone le plus ancien de JavaScript, antérieur aux Promises."
@@ -1226,8 +1226,8 @@ const MODULES = [
         code: `function chercherDonnees(callback) {\n  setTimeout(() => {\n    callback(null, { id: 1 });\n  }, 100);\n}\nchercherDonnees((erreur, donnees) => {\n  if (erreur) return console.error(erreur);\n  console.log(donnees);\n});`,
         prompt: "Pourquoi le callback reçoit-il DEUX arguments (erreur, donnees) ?",
         options: [
-          "C'est une erreur, un callback ne devrait recevoir qu'un argument",
-          "C'est la convention \"error-first callback\" : le premier argument est réservé à une éventuelle erreur (null si tout va bien), le second au résultat",
+          "Erreur : un callback ne prend qu'un seul argument",
+          "Convention « error-first » : erreur en 1er, résultat en 2nd",
           "Le premier argument est toujours ignoré",
           "Ça n'a aucune signification particulière"
         ],
@@ -1239,7 +1239,7 @@ const MODULES = [
         prompt: "Quel est le principal défaut des callbacks imbriqués (\"callback hell\") que les Promises ont cherché à résoudre ?",
         options: [
           "Les callbacks sont plus lents à l'exécution",
-          "Un enchaînement de callbacks imbriqués (chacun dans le précédent) devient vite illisible et difficile à maintenir, avec une gestion d'erreurs répétée à chaque niveau",
+          "Des callbacks imbriqués deviennent vite illisibles à maintenir",
           "Les callbacks ne peuvent pas recevoir d'arguments",
           "Les navigateurs ne supportent plus les callbacks"
         ],
@@ -1258,12 +1258,12 @@ const MODULES = [
         concept: "callbacks",
         prompt: "Un callback est-il forcément lié à une opération ASYNCHRONE ?",
         options: [
-          "Oui, toujours",
-          "Non — array.map(callback) l'utilise de façon parfaitement SYNCHRONE, tandis que setTimeout(callback) l'utilise de façon asynchrone",
+          "Non : map(cb) est synchrone, setTimeout(cb) asynchrone",
+          "Oui, un callback est toujours asynchrone",
           "Seuls les callbacks de setTimeout comptent vraiment",
-          "Un callback devient async automatiquement"
+          "Un callback devient toujours async automatiquement"
         ],
-        correct: 1,
+        correct: 0,
         explain: "\"Callback\" décrit juste le PATRON (passer une fonction en argument pour qu'elle soit appelée plus tard, par quelqu'un d'autre) — pas forcément le TIMING. map, filter, sort utilisent des callbacks 100% synchrones ; setTimeout, addEventListener les utilisent de façon asynchrone."
       },
       {
@@ -1271,10 +1271,10 @@ const MODULES = [
         code: `bouton.addEventListener("click", function(evenement) {\n  console.log(evenement.target);\n});`,
         prompt: "Quel argument le navigateur passe-t-il automatiquement à ce callback lors d'un clic ?",
         options: [
-          "Aucun argument",
-          "Un objet Event décrivant l'événement (cible cliquée, type, position...), passé automatiquement par le navigateur au moment du déclenchement",
-          "Le bouton HTML directement en tant que chaîne",
-          "L'index du clic dans une liste"
+          "Aucun argument n'est passé au callback",
+          "Un objet Event décrivant l'événement (cible, type, position)",
+          "Le bouton HTML directement, en tant que chaîne",
+          "L'index du clic dans une liste d'éléments"
         ],
         correct: 1,
         explain: "addEventListener appelle son callback avec un objet Event en argument, fourni par le navigateur — il contient toutes les informations sur l'interaction. C'est un exemple de callback déclenché par un événement utilisateur, pas par un timer ou une donnée réseau."
@@ -1283,20 +1283,20 @@ const MODULES = [
         concept: "callbacks",
         prompt: "Un callback peut-il directement RENVOYER une valeur à la fonction qui l'a appelé de façon asynchrone (ex: dans setTimeout) ?",
         options: [
-          "Oui, avec return normal",
-          "Non — au moment où setTimeout(callback, 1000) est appelé, l'exécution continue immédiatement ; le return du callback (bien plus tard) n'a plus personne pour le récupérer directement, d'où l'usage d'un second callback ou d'une Promise",
-          "Oui, mais seulement avec async/await",
-          "Non, un callback ne peut jamais rien renvoyer"
+          "Oui, avec un return normal dans le callback",
+          "Oui, mais uniquement avec async/await",
+          "Non, un callback ne renvoie jamais rien du tout",
+          "Non : l'appelant a déjà continué, le return n'a plus de destinataire"
         ],
-        correct: 1,
+        correct: 3,
         explain: "La fonction appelante a déjà terminé son exécution bien avant que le callback asynchrone ne s'exécute. Le résultat doit donc être transmis PAR le callback lui-même (en argument), pas via un return classique — c'est exactement ce que les Promises modélisent plus proprement."
       },
       {
         concept: "promises",
         prompt: "Quelle est la vraie différence entre un callback et une Promise ?",
         options: [
-          "Aucune différence",
-          "Une Promise est un objet représentant un résultat futur (résolu ou rejeté), ce qui évite l'imbrication en cascade des callbacks",
+          "Aucune différence entre les deux",
+          "Une Promise est un objet représentant un résultat futur",
           "Les callbacks sont plus modernes que les Promises",
           "Une Promise est toujours synchrone"
         ],
@@ -1308,8 +1308,8 @@ const MODULES = [
         code: `function attendre(ms) {\n  return new Promise((resolve) => {\n    setTimeout(resolve, ms);\n  });\n}`,
         prompt: "Que fait le constructeur new Promise((resolve, reject) => {...}) ici ?",
         options: [
-          "Il exécute immédiatement resolve",
-          "Il crée une Promise \"maison\" : la fonction exécuteur reçoit resolve et reject, à appeler manuellement quand l'opération asynchrone se termine — c'est ainsi qu'on transforme une API à callback (setTimeout) en Promise",
+          "Il exécute immédiatement resolve, sans attendre",
+          "Il crée une Promise « maison » : resolve/reject à appeler soi-même",
           "resolve et reject sont optionnels et rarement utilisés",
           "new Promise ne peut être utilisé qu'avec fetch"
         ],
@@ -1322,7 +1322,7 @@ const MODULES = [
         prompt: "Que représente chaque .then() successif dans cette chaîne ?",
         options: [
           "Ils s'exécutent tous en parallèle, immédiatement",
-          "Chaque .then() transforme la valeur résolue du précédent et renvoie une NOUVELLE Promise résolue avec cette valeur transformée — la chaîne construit une pipeline de transformations successives",
+          "Chaque .then transforme la valeur et renvoie une nouvelle Promise",
           "Seul le dernier .then() compte réellement",
           "C'est une erreur d'enchaîner plus de deux .then()"
         ],
@@ -1333,10 +1333,10 @@ const MODULES = [
         concept: "async-await",
         prompt: "Que fait précisément le mot-clé await ?",
         options: [
-          "Il transforme automatiquement une fonction normale en fonction async",
-          "Il met en pause l'exécution de la fonction async jusqu'à résolution de la Promise, sans bloquer le thread principal du navigateur",
-          "Il annule une Promise en cours",
-          "Il exécute plusieurs Promises en parallèle automatiquement"
+          "Il transforme une fonction normale en fonction async",
+          "Il suspend la fonction async jusqu'à résolution, sans bloquer le thread",
+          "Il annule une Promise déjà en cours",
+          "Il lance plusieurs Promises en parallèle"
         ],
         correct: 1,
         explain: "await suspend uniquement la fonction async courante en attendant le résultat de la Promise — le reste du programme (et le thread principal) continue de fonctionner normalement pendant ce temps."
@@ -1361,10 +1361,10 @@ const MODULES = [
         concept: "event-loop",
         prompt: "Pourquoi dit-on que JavaScript est \"single-threaded\" mais peut quand même gérer des opérations asynchrones (réseau, timers) sans bloquer ?",
         options: [
-          "JavaScript crée en réalité des threads cachés pour chaque opération asynchrone",
-          "Le moteur JS délègue les opérations longues (réseau, timers) à l'environnement (navigateur/Node), qui prévient la file d'attente (event loop) une fois le résultat prêt, sans bloquer le thread principal entre-temps",
-          "Ce n'est vrai qu'en théorie, en pratique JavaScript utilise plusieurs threads",
-          "Les opérations asynchrones sont en réalité synchrones mais très rapides"
+          "JS crée des threads cachés pour chaque opération async",
+          "Le moteur délègue les tâches longues à l'environnement (event loop)",
+          "En pratique, JavaScript utilise en réalité plusieurs threads",
+          "Les opérations async sont en fait synchrones mais très rapides"
         ],
         correct: 1,
         explain: "Le thread principal de JS reste unique, mais l'environnement d'exécution (Web APIs du navigateur, ou libuv sous Node) gère les opérations longues séparément. Une fois terminées, elles sont placées dans une file (queue), que l'event loop traite dès que le thread principal est libre — d'où l'illusion de parallélisme sans vrais threads JS."
@@ -1373,8 +1373,8 @@ const MODULES = [
         concept: "event-loop",
         prompt: "Que sont les \"microtasks\" (Promise.then, queueMicrotask) par rapport aux \"macrotasks\" (setTimeout, setInterval) dans l'event loop ?",
         options: [
-          "Ce sont des synonymes",
-          "Toute la file des microtasks est entièrement vidée entre chaque macrotask — les microtasks ont donc toujours la priorité, même sur un setTimeout(fn, 0)",
+          "Ce sont deux synonymes du même mécanisme",
+          "Les microtasks sont vidées entièrement entre chaque macrotask",
           "Les macrotasks sont toujours plus rapides",
           "Il n'existe qu'une seule file d'attente en JavaScript"
         ],
@@ -1385,8 +1385,8 @@ const MODULES = [
         concept: "event-loop",
         prompt: "Pourquoi un calcul synchrone très long (ex: une boucle de plusieurs secondes) \"gèle\"-t-il l'interface d'une page web ?",
         options: [
-          "Ce n'est jamais le cas, JS gère toujours l'UI séparément",
-          "JavaScript étant single-threaded, le thread principal exécute le calcul en continu sans jamais rendre la main — aucun événement (clic, rendu, animation) ne peut être traité tant que le code synchrone n'est pas terminé",
+          "Ce n'est jamais le cas : JS gère l'UI à part",
+          "Single-threaded : le calcul monopolise le thread, rien d'autre ne passe",
           "L'UI tourne toujours sur un thread séparé, quoi qu'il arrive",
           "Ça ne concerne que Node.js, pas le navigateur"
         ],
@@ -1405,10 +1405,10 @@ const MODULES = [
         concept: "event-loop",
         prompt: "Une application web \"lag\" pendant qu'un gros calcul JavaScript synchrone tourne. Pourquoi setTimeout(() => calculLourd(), 0) autour du calcul aide-t-il un peu, sans le rendre instantané ?",
         options: [
-          "setTimeout rend le calcul plus rapide",
-          "setTimeout(fn, 0) ne rend pas le calcul plus rapide, mais il le repousse à la prochaine \"tick\" de l'event loop, laissant une occasion au thread principal de traiter d'abord le rendu — le calcul reste tout aussi bloquant une fois démarré",
-          "setTimeout exécute automatiquement le calcul sur un autre thread",
-          "Ça n'a strictement aucun effet"
+          "setTimeout rend le calcul plus rapide à exécuter",
+          "Il repousse le calcul à la prochaine tick, sans l'accélérer",
+          "setTimeout exécute le calcul sur un autre thread",
+          "Ça n'a strictement aucun effet visible"
         ],
         correct: 1,
         explain: "setTimeout(fn, 0) place fn dans la file des macrotasks, après tout ce qui est déjà en attente. Ça peut laisser une frame s'afficher AVANT que le calcul ne démarre — mais une fois lancé, ce calcul reste 100% synchrone et bloquant (la vraie solution pour un calcul lourd est un Web Worker, un thread séparé)."
@@ -1418,10 +1418,10 @@ const MODULES = [
         code: `async function chercherUtilisateur(id) {\n  try {\n    const res = await fetch(\`/api/users/\${id}\`);\n    if (!res.ok) throw new Error("Utilisateur introuvable");\n    return await res.json();\n  } catch (e) {\n    console.error(e.message);\n    return null;\n  }\n}`,
         prompt: "Pourquoi entoure-t-on ce code de try/catch plutôt que de laisser l'erreur remonter ?",
         options: [
-          "try/catch est obligatoire avec async/await, sinon erreur de syntaxe",
-          "Une Promise rejetée (réseau en échec, ou le throw manuel) devient une exception que await propage — sans try/catch, l'appelant devrait gérer un rejet non prévu",
-          "try/catch rend le code plus rapide",
-          "Ça n'a aucun effet, c'est juste une convention de style"
+          "try/catch est obligatoire avec async, sinon erreur",
+          "await propage un rejet en exception : le gérer ici est plus clair",
+          "try/catch rend simplement le code plus rapide",
+          "Ça n'a aucun effet, c'est juste une convention"
         ],
         correct: 1,
         explain: "await transforme le rejet d'une Promise en exception JavaScript classique. Sans try/catch, cette exception remonterait telle quelle à l'appelant (ou provoquerait une Unhandled Promise Rejection) au lieu d'être gérée proprement ici, où le contexte pour réagir est le plus clair."
@@ -1439,8 +1439,8 @@ const MODULES = [
         code: `async function tout() {\n  const a = await fetch(url1);\n  const b = await fetch(url2);\n}`,
         prompt: "Pourquoi ce code est-il moins performant qu'il ne pourrait l'être, si url1 et url2 sont indépendantes ?",
         options: [
-          "Il n'y a aucun problème",
-          "Les deux fetch s'exécutent en SÉRIE (b attend que a soit terminé) alors qu'ils pourraient partir en PARALLÈLE — Promise.all([fetch(url1), fetch(url2)]) serait plus rapide",
+          "Il n'y a aucun problème dans ce code",
+          "Les fetch partent en série ; Promise.all les lancerait en parallèle",
           "fetch ne peut être appelé qu'une fois par fonction async",
           "await ralentit toujours le réseau lui-même"
         ],
@@ -1452,8 +1452,8 @@ const MODULES = [
         code: `async function risque() {\n  await Promise.reject(new Error("échec"));\n}\nrisque();`,
         prompt: "Que se passe-t-il en appelant risque() sans await ni .catch ?",
         options: [
-          "Rien, l'erreur est ignorée silencieusement",
-          "Une Unhandled Promise Rejection est signalée — l'erreur interne se propage comme rejet de la Promise renvoyée par risque(), qui n'est ici gérée par personne",
+          "Rien : l'erreur est ignorée silencieusement",
+          "Une Unhandled Promise Rejection : le rejet n'est géré par personne",
           "Le programme s'arrête immédiatement",
           "risque() renvoie automatiquement undefined sans erreur"
         ],
@@ -1466,8 +1466,8 @@ const MODULES = [
         prompt: "Pourquoi utiliser une boucle for...of avec await ici, plutôt qu'un .map(async id => await chercherUn(id)) ?",
         options: [
           "Il n'y a aucune différence entre les deux",
-          ".map() avec un callback async renvoie un tableau de PROMISES (pas de résultats), car map ne sait pas attendre un callback asynchrone — la boucle for...of attend réellement chaque itération avant de continuer",
-          "for...of est toujours plus rapide",
+          ".map(async) renvoie un tableau de Promises, pas de résultats",
+          "for...of est toujours plus rapide que map",
           "map() ne peut pas contenir await du tout"
         ],
         correct: 1,
@@ -1479,7 +1479,7 @@ const MODULES = [
         prompt: "Dans quel ordre \"début\", \"après l'appel\" et \"fin\" s'affichent-ils ?",
         options: [
           "début, fin, après l'appel",
-          "début, après l'appel, fin — le code synchrone AVANT le premier await s'exécute immédiatement, puis la fonction rend la main dès l'await, laissant le code appelant continuer avant que \"fin\" ne s'affiche",
+          "début, après l'appel, fin",
           "après l'appel, début, fin",
           "Toujours dans un ordre imprévisible"
         ],
@@ -1490,10 +1490,10 @@ const MODULES = [
         concept: "promises",
         prompt: "Que fait Promise.all([p1, p2, p3]) ?",
         options: [
-          "Elle exécute les promesses en séquence, une par une",
-          "Elle attend que toutes les promesses soient résolues et renvoie un tableau des résultats, ou rejette dès la première erreur",
-          "Elle renvoie seulement le résultat de la première promesse résolue",
-          "Elle ignore silencieusement les erreurs"
+          "Elle exécute les promesses en séquence, une à une",
+          "Elle attend toutes les promesses ; rejette à la 1re erreur",
+          "Elle renvoie la première promesse résolue seulement",
+          "Elle ignore silencieusement toutes les erreurs"
         ],
         correct: 1,
         explain: "Promise.all lance toutes les promesses en parallèle et attend qu'elles soient toutes résolues. Si une seule échoue, Promise.all rejette immédiatement avec cette erreur."
@@ -1503,9 +1503,9 @@ const MODULES = [
         prompt: "Quelle est la différence entre Promise.all et Promise.allSettled ?",
         options: [
           "Aucune différence",
-          "Promise.all rejette dès le premier échec, alors que Promise.allSettled attend toutes les promesses et renvoie le statut (succès ou échec) de chacune",
-          "Promise.allSettled est plus rapide",
-          "Promise.all ignore les rejets"
+          "all rejette au 1er échec ; allSettled attend tout et donne chaque statut",
+          "Promise.allSettled est simplement plus rapide",
+          "Promise.all ignore les rejets éventuels"
         ],
         correct: 1,
         explain: "Promise.allSettled ne s'arrête jamais en cas d'erreur : elle attend que toutes les promesses se terminent (résolues ou rejetées) et te donne le détail de chacune, ce qui est utile quand un échec partiel est acceptable."
@@ -1514,10 +1514,10 @@ const MODULES = [
         concept: "fetch",
         prompt: "Que renvoie fetch(url) par défaut ?",
         options: [
-          "Directement les données JSON",
-          "Une Promise qui se résout en un objet Response, qu'il faut ensuite parser (ex : .json())",
-          "Une chaîne de texte brute",
-          "Un objet XML uniquement"
+          "Directement les données JSON parsées",
+          "Une Promise<Response> à parser ensuite (ex : .json())",
+          "Une chaîne de texte brute non parsée",
+          "Un objet XML, uniquement"
         ],
         correct: 1,
         explain: "fetch renvoie une Promise<Response>. La Response contient les en-têtes, le statut, etc. Pour obtenir les données utilisables, il faut appeler une méthode comme response.json() ou response.text(), qui renvoie elle-même une Promise."
@@ -1527,10 +1527,10 @@ const MODULES = [
         code: `fetch(url)\n  .then(res => res.json())\n  .then(data => console.log(data))\n  .catch(err => console.error(err));`,
         prompt: "À quoi sert précisément .catch() à la fin de cette chaîne ?",
         options: [
-          "Il ne s'exécute que si fetch lui-même échoue (erreur réseau)",
-          "Il attrape toute erreur survenue N'IMPORTE OÙ dans la chaîne .then() précédente — erreur réseau de fetch, mais aussi une exception dans res.json() ou dans le traitement de data",
+          "Il ne s'exécute que si fetch lui-même échoue",
+          "Il attrape toute erreur survenue dans la chaîne .then précédente",
           "Il s'exécute systématiquement, même sans erreur",
-          "Il remplace le premier .then()"
+          "Il remplace le premier .then() de la chaîne"
         ],
         correct: 1,
         explain: ".catch() en fin de chaîne intercepte un rejet survenu à N'IMPORTE QUELLE étape précédente — pas seulement le fetch initial. C'est l'équivalent asynchrone d'un try/catch englobant toute la chaîne."
@@ -1540,9 +1540,9 @@ const MODULES = [
         code: `const res = await fetch("/api/introuvable");\nconsole.log(res.ok, res.status);`,
         prompt: "Si l'URL renvoie une réponse 404, que se passe-t-il ?",
         options: [
-          "fetch lève une exception, interceptée par un try/catch",
-          "fetch ne rejette PAS pour un statut HTTP d'erreur (404, 500...) — la Promise se résout normalement, avec res.ok à false et res.status à 404 ; c'est au code appelant de vérifier res.ok explicitement",
-          "res vaut null",
+          "fetch lève une exception, prise par un try/catch",
+          "fetch ne rejette pas sur 404 : res.ok=false à vérifier soi-même",
+          "res vaut null après la requête",
           "Le navigateur bloque automatiquement la requête"
         ],
         correct: 1,
@@ -1553,10 +1553,10 @@ const MODULES = [
         code: `fetch(url, {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ nom: "Ana" }),\n});`,
         prompt: "Pourquoi faut-il JSON.stringify() le corps de la requête ici ?",
         options: [
-          "Ce n'est pas nécessaire, fetch le fait automatiquement",
-          "Le corps (body) d'une requête HTTP est du texte brut — JSON.stringify convertit l'objet JavaScript en chaîne JSON textuelle, que le header Content-Type annonce ensuite au serveur",
-          "JSON.stringify chiffre les données",
-          "C'est uniquement pour la compatibilité avec Node.js"
+          "Inutile : fetch le sérialise automatiquement",
+          "Le body HTTP est du texte : stringify convertit l'objet en JSON",
+          "JSON.stringify chiffre les données envoyées",
+          "Uniquement pour la compatibilité avec Node.js"
         ],
         correct: 1,
         explain: "HTTP transporte du texte (ou des octets bruts), pas des objets JavaScript. JSON.stringify sérialise l'objet en une chaîne JSON, que le serveur pourra reparser — le header Content-Type: application/json informe le serveur du format attendu."
@@ -1566,10 +1566,10 @@ const MODULES = [
         code: `const controleur = new AbortController();\nfetch(url, { signal: controleur.signal });\nsetTimeout(() => controleur.abort(), 5000);`,
         prompt: "À quoi sert AbortController ici ?",
         options: [
-          "Il ralentit délibérément la requête",
-          "Il permet d'ANNULER une requête fetch en cours (ici après 5 secondes) — sans lui, il n'existe aucun moyen natif d'interrompre un fetch déjà lancé",
-          "Il retente automatiquement la requête en cas d'échec",
-          "Il chiffre la requête"
+          "Il ralentit délibérément la requête réseau",
+          "Il permet d'annuler un fetch en cours (ici après 5 s)",
+          "Il retente automatiquement la requête en échec",
+          "Il chiffre le contenu de la requête"
         ],
         correct: 1,
         explain: "fetch ne propose pas de timeout intégré ni de méthode .cancel() : AbortController est le mécanisme standard pour annuler une requête en cours. On lui passe son signal via l'option signal, et appeler controleur.abort() rejette la Promise de fetch."
@@ -1579,10 +1579,10 @@ const MODULES = [
         code: `const res = await fetch(url);\nconsole.log(res.headers.get("content-type"));`,
         prompt: "Que permet res.headers.get(\"content-type\") ?",
         options: [
-          "Lire le corps de la réponse",
-          "Lire un en-tête HTTP spécifique de la réponse (ici le type de contenu renvoyé) — utile pour décider comment parser le corps avant même de l'avoir lu",
+          "Lire le corps complet de la réponse",
+          "Lire un en-tête HTTP précis de la réponse (ici content-type)",
           "Modifier les en-têtes envoyés par le client",
-          "C'est une erreur, headers n'est pas un objet accessible ainsi"
+          "Erreur : headers ne s'accède pas ainsi"
         ],
         correct: 1,
         explain: "res.headers est un objet Headers offrant un accès aux en-têtes HTTP de la réponse, interrogeables via .get(nom). Vérifier content-type avant de parser permet de choisir entre res.json() et res.text() selon ce que le serveur annonce réellement renvoyer."
@@ -1591,10 +1591,10 @@ const MODULES = [
         concept: "promises",
         prompt: "Que se passe-t-il si une Promise est rejetée sans aucun .catch ni try/catch ?",
         options: [
-          "Rien, l'application continue normalement sans avertissement",
-          "Une \"Unhandled Promise Rejection\" est signalée",
+          "Rien : l'app continue sans aucun avertissement",
+          "Une « Unhandled Promise Rejection » est signalée",
           "La Promise devient automatiquement résolue",
-          "Le thread principal se bloque"
+          "Le thread principal se bloque totalement"
         ],
         correct: 1,
         explain: "JavaScript signale les rejets de Promise non gérés (Unhandled Promise Rejection), aussi bien dans le navigateur que sous Node.js. C'est pourquoi il faut toujours prévoir un .catch ou un try/catch autour d'un await."
@@ -1604,8 +1604,8 @@ const MODULES = [
         prompt: "Comment exécuter plusieurs appels asynchrones en parallèle plutôt qu'en série ?",
         options: [
           "Enchaîner plusieurs await l'un après l'autre",
-          "Lancer tous les appels d'abord (sans await), puis utiliser Promise.all sur les promesses obtenues",
-          "Utiliser une boucle for avec await à chaque itération",
+          "Lancer tous les appels sans await, puis Promise.all dessus",
+          "Une boucle for avec await à chaque itération",
           "Ce n'est pas possible en JavaScript"
         ],
         correct: 1,
@@ -1659,7 +1659,7 @@ const MODULES = [
         prompt: "Quel est l'avantage principal de TypeScript par rapport à JavaScript pur ?",
         options: [
           "Il s'exécute plus vite dans le navigateur",
-          "Il ajoute un système de types statiques, vérifié à la compilation, qui détecte des erreurs avant l'exécution",
+          "Un typage statique vérifié à la compilation, avant l'exécution",
           "Il remplace totalement JavaScript au runtime",
           "Il supprime le besoin d'écrire des tests"
         ],
@@ -1684,11 +1684,11 @@ const MODULES = [
         prompt: "Qu'apporte un enum par rapport à de simples chaînes littérales pour représenter un ensemble fixe de valeurs ?",
         options: [
           "Aucune différence, c'est purement stylistique",
-          "Un ensemble nommé et fermé de valeurs possibles, avec autocomplétion et vérification à la compilation — une faute de frappe sur un membre est immédiatement détectée, contrairement à une chaîne libre",
-          "Les enums sont plus rapides à l'exécution",
+          "Les enums sont simplement plus rapides à l'exécution",
+          "Un ensemble nommé et fermé, vérifié à la compilation",
           "Les enums remplacent obligatoirement les unions de types"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Un enum documente et contraint un ensemble fini de valeurs nommées. Le compilateur vérifie chaque utilisation — une faute de frappe sur le nom d'un membre est détectée immédiatement, alors qu'une chaîne libre ne serait détectée qu'à l'exécution (ou jamais)."
       },
       {
@@ -1697,7 +1697,7 @@ const MODULES = [
         prompt: "Qu'est-ce qu'un \"tuple\" comme [number, number] en TypeScript, par rapport à un simple number[] ?",
         options: [
           "Aucune différence, ce sont des synonymes",
-          "Un tuple fixe à la fois la LONGUEUR et le TYPE de chaque position — un troisième élément serait une erreur, contrairement à number[] qui accepte n'importe quelle longueur",
+          "Il fixe la longueur ET le type de chaque position",
           "Un tuple ne peut contenir que des nombres",
           "Un tuple est immuable par défaut"
         ],
@@ -1721,12 +1721,12 @@ const MODULES = [
         code: `interface Forme {\n  aire(): number;\n}\nclass Cercle implements Forme {\n  constructor(private rayon: number) {}\n  aire() { return Math.PI * this.rayon ** 2; }\n}`,
         prompt: "Que garantit implements Forme sur la classe Cercle ?",
         options: [
-          "Cercle hérite du code de Forme",
-          "Le compilateur TypeScript vérifie que Cercle possède bien toutes les méthodes/propriétés déclarées par l'interface Forme (ici aire()), sinon erreur de compilation",
-          "Forme devient inutilisable ailleurs",
-          "C'est purement décoratif, sans vérification"
+          "Cercle hérite du code de l'interface Forme",
+          "Forme devient inutilisable partout ailleurs",
+          "C'est purement décoratif, sans aucune vérification",
+          "Le compilateur vérifie que Cercle a bien les membres de Forme"
         ],
-        correct: 1,
+        correct: 3,
         explain: "implements est un CONTRAT vérifié à la compilation : contrairement à extends (héritage de code), une interface ne fournit aucune implémentation — elle force juste la classe à respecter une forme précise, ici la présence d'une méthode aire() renvoyant un number."
       },
       {
@@ -1734,8 +1734,8 @@ const MODULES = [
         code: `interface ConfigBase {\n  nom: string;\n}\ninterface ConfigAvancee extends ConfigBase {\n  timeout: number;\n}`,
         prompt: "Que fait extends entre deux interfaces ?",
         options: [
-          "C'est une erreur, extends ne s'utilise qu'avec des classes",
-          "ConfigAvancee hérite de toutes les propriétés de ConfigBase (ici nom), en plus des siennes (timeout) — un objet ConfigAvancee doit donc avoir nom ET timeout",
+          "Erreur : extends ne s'utilise qu'avec des classes",
+          "ConfigAvancee hérite des propriétés de ConfigBase, plus les siennes",
           "ConfigAvancee remplace complètement ConfigBase",
           "Les deux interfaces deviennent interchangeables"
         ],
@@ -1748,7 +1748,7 @@ const MODULES = [
         prompt: "Que se passe-t-il à la ligne p.x = 5 ?",
         options: [
           "Ça fonctionne normalement, x devient 5",
-          "Erreur de compilation TypeScript : readonly interdit toute réassignation après la création de l'objet",
+          "Erreur de compilation : readonly interdit la réassignation",
           "Erreur seulement à l'exécution, pas à la compilation",
           "readonly n'a aucun effet en pratique"
         ],
@@ -1760,12 +1760,12 @@ const MODULES = [
         code: `interface Comparateur {\n  (a: number, b: number): number;\n}\nconst parOrdre: Comparateur = (a, b) => a - b;`,
         prompt: "Que décrit cette interface Comparateur ?",
         options: [
-          "La forme d'un objet avec des propriétés",
-          "La SIGNATURE d'une fonction : une interface peut décrire un type de fonction (paramètres et type de retour), pas seulement la forme d'un objet",
-          "C'est une erreur, les interfaces ne décrivent que des objets",
-          "Une classe abstraite"
+          "La forme d'un objet avec ses propriétés",
+          "Erreur : une interface ne décrit que des objets",
+          "La signature d'une fonction (params et type de retour)",
+          "Une classe abstraite à implémenter ensuite"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Les interfaces TypeScript ne se limitent pas à décrire des objets avec propriétés — une syntaxe (params): retour à l'intérieur décrit le type d'une FONCTION elle-même, utile pour typer des callbacks ou des comparateurs comme ici."
       },
       {
@@ -1774,8 +1774,8 @@ const MODULES = [
         prompt: "Que permet [cle: string]: number dans cette interface ?",
         options: [
           "Limiter l'objet à exactement une propriété",
-          "Une \"index signature\" : elle autorise un NOMBRE INDÉTERMINÉ de propriétés, dont on ne connaît pas les noms à l'avance, tant que chaque clé est une chaîne et chaque valeur un number",
-          "C'est une erreur de syntaxe",
+          "Une « index signature » : N propriétés aux noms inconnus",
+          "C'est une erreur de syntaxe TypeScript",
           "Elle force toutes les clés à s'appeler cle"
         ],
         correct: 1,
@@ -1786,12 +1786,12 @@ const MODULES = [
         code: `function identity<T>(x: T): T {\n  return x;\n}`,
         prompt: "Que permet ce \"generic\" <T> ?",
         options: [
-          "Forcer x à être de type any",
-          "Réutiliser la fonction avec différents types, tout en garantissant que le type d'entrée correspond au type de sortie",
-          "Transformer T en chaîne automatiquement",
-          "C'est une erreur de syntaxe"
+          "Réutiliser la fonction pour tout type, entrée = sortie",
+          "Forcer le paramètre x à être de type any",
+          "Transformer T en chaîne de caractères automatiquement",
+          "C'est une erreur de syntaxe TypeScript"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Un generic comme <T> est un \"paramètre de type\" : il permet d'écrire une fonction réutilisable pour n'importe quel type, tout en conservant la relation entre les types (ici, le type retourné est toujours identique au type reçu)."
       },
       {
@@ -1799,10 +1799,10 @@ const MODULES = [
         code: `function premier<T>(arr: T[]): T | undefined {\n  return arr[0];\n}`,
         prompt: "Pourquoi le type de retour est-il T | undefined plutôt que juste T ?",
         options: [
-          "C'est une erreur, ça devrait être juste T",
-          "Parce qu'un tableau peut être vide : arr[0] vaudrait alors undefined, et le type doit refléter ce cas réel",
-          "undefined est ajouté automatiquement à tous les types génériques",
-          "Pour forcer l'appelant à toujours fournir une valeur par défaut"
+          "Erreur : ça devrait être juste T",
+          "Un tableau peut être vide : arr[0] vaudrait undefined",
+          "undefined est ajouté automatiquement à tous les generics",
+          "Pour forcer l'appelant à fournir une valeur par défaut"
         ],
         correct: 1,
         explain: "Un tableau vide existe (arr.length === 0), et dans ce cas arr[0] vaut undefined à l'exécution. Le type T | undefined documente honnêtement ce cas limite, plutôt que de prétendre qu'un élément est toujours présent."
@@ -1812,12 +1812,12 @@ const MODULES = [
         code: `function plusLong<T extends { length: number }>(a: T, b: T): T {\n  return a.length >= b.length ? a : b;\n}`,
         prompt: "Que permet la contrainte extends { length: number } sur ce generic ?",
         options: [
-          "Restreindre T à uniquement le type number",
-          "Autoriser T à être n'importe quel type POSSÉDANT une propriété length (chaînes, tableaux...), tout en gardant le type exact d'entrée/sortie",
-          "C'est une erreur de syntaxe, extends ne s'utilise que pour les classes",
-          "Forcer T à être un tableau uniquement"
+          "Restreindre T au seul type number",
+          "Erreur : extends ne s'utilise qu'avec des classes",
+          "Forcer T à être un tableau, rien d'autre",
+          "Autoriser tout T ayant une propriété length (chaînes, tableaux…)"
         ],
-        correct: 1,
+        correct: 3,
         explain: "extends sur un generic pose une borne : T peut être n'importe quel type compatible avec la forme { length: number } (chaînes, tableaux, objets custom avec length...), sans perdre la précision du type reçu — contrairement à un paramètre typé juste any ou { length: number } sans generic, qui perdrait cette précision."
       },
       {
@@ -1833,9 +1833,9 @@ const MODULES = [
         code: `class Boite<T> {\n  private contenu: T;\n  constructor(valeur: T) { this.contenu = valeur; }\n  obtenir(): T { return this.contenu; }\n}\nconst b = new Boite<string>("secret");`,
         prompt: "Pourquoi utiliser une classe générique Boite<T> plutôt que Boite avec contenu: any ?",
         options: [
-          "any et T sont strictement équivalents",
-          "Avec T, TypeScript garde la précision du type à travers toute la classe : b.obtenir() est connu comme renvoyant précisément string, alors qu'avec any la vérification de type serait totalement perdue",
-          "Les generics sont juste une convention de nommage sans effet",
+          "any et T sont strictement équivalents ici",
+          "T garde la précision du type : b.obtenir() renvoie bien string",
+          "Les generics sont une convention de nommage sans effet",
           "any est toujours préférable pour la flexibilité"
         ],
         correct: 1,
@@ -1845,7 +1845,7 @@ const MODULES = [
         concept: "generiques",
         code: `function creerListe<T = string>(elements: T[] = []): T[] {\n  return elements;\n}\nconst l = creerListe();`,
         prompt: "Que vaut le type de l si aucun type ni argument n'est fourni à creerListe() ?",
-        options: ["any[]", "string[] — grâce à T = string, une valeur PAR DÉFAUT pour le paramètre de type, utilisée quand rien ne permet de l'inférer autrement", "unknown[]", "Erreur de compilation obligatoire"],
+        options: ["any[]", "string[], grâce à la valeur par défaut T = string", "unknown[]", "Erreur de compilation obligatoire"],
         correct: 1,
         explain: "Comme un paramètre de fonction, un paramètre de type generic peut avoir une valeur par défaut (T = string). Sans argument ni contexte permettant d'inférer T autrement, TypeScript retombe sur ce type par défaut plutôt que sur any."
       },
@@ -1854,12 +1854,12 @@ const MODULES = [
         code: `interface AvecId { id: number; }\nfunction trouverParId<T extends AvecId>(liste: T[], id: number): T | undefined {\n  return liste.find(item => item.id === id);\n}`,
         prompt: "Pourquoi la contrainte T extends AvecId est-elle nécessaire ici ?",
         options: [
+          "Sans elle, TS ignore que T possède id : item.id serait une erreur",
           "Elle ne sert à rien, le code fonctionnerait sans",
-          "Sans elle, TypeScript ne saurait pas que T possède une propriété id, et item.id === id serait une erreur de compilation — la contrainte garantit que TOUT type utilisé pour T a au minimum cette forme",
           "Elle limite T à être exactement AvecId, rien d'autre",
-          "C'est une erreur de syntaxe, extends interdit sur un generic contraint par une interface"
+          "Erreur : extends interdit sur un generic contraint"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Sans contrainte, T serait totalement libre et le compilateur ne pourrait garantir qu'un item de type T possède une propriété id. extends AvecId impose que T soit AU MOINS compatible avec cette forme, tout en restant flexible sur les propriétés supplémentaires que T peut avoir."
       },
       {
@@ -1883,9 +1883,9 @@ const MODULES = [
         prompt: "À quoi sert as const ici ?",
         options: [
           "Convertir l'objet en constante au moment de l'exécution",
-          "Indiquer au compilateur de typer la valeur de façon la plus précise possible (littéral \"dark\", propriétés readonly)",
+          "Typer au plus précis : littéral « dark », propriétés readonly",
           "Supprimer tous les types de l'objet",
-          "Transformer l'objet en enum"
+          "Transformer l'objet en un enum"
         ],
         correct: 1,
         explain: "as const verrouille le typage au niveau le plus précis : mode est typé comme le littéral \"dark\" (et non string), et les propriétés deviennent readonly. C'est très utile pour des constantes ou de la configuration."
@@ -1895,8 +1895,8 @@ const MODULES = [
         prompt: "Pourquoi préférer unknown à any quand on reçoit une donnée dont le type n'est pas garanti ?",
         options: [
           "Ils sont parfaitement identiques",
-          "unknown oblige à vérifier ou affiner le type avant de l'utiliser, ce qui est plus sûr",
-          "any est plus sûr que unknown",
+          "unknown force à vérifier le type avant usage, plus sûr",
+          "any est en fait plus sûr que unknown",
           "unknown ne peut pas être utilisé en TypeScript"
         ],
         correct: 1,
@@ -1941,12 +1941,12 @@ const MODULES = [
         concept: "composants",
         prompt: "Qu'est-ce qu'un composant React, fondamentalement ?",
         options: [
-          "Une feuille de style CSS",
-          "Une fonction (ou classe) qui retourne du JSX décrivant une partie de l'interface",
-          "Un fichier de configuration du projet",
-          "Un type de base de données"
+          "Une feuille de style CSS réutilisable",
+          "Un fichier de configuration du build",
+          "Une fonction qui retourne du JSX à afficher",
+          "Un format de stockage de données"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Un composant React est avant tout une fonction JavaScript qui prend des props en entrée et retourne du JSX (la description de ce qui doit s'afficher). React se charge de transformer ce JSX en éléments du DOM réel."
       },
       {
@@ -1954,24 +1954,24 @@ const MODULES = [
         code: `function Carte({ titre, children }) {\n  return (\n    <div className="carte">\n      <h3>{titre}</h3>\n      {children}\n    </div>\n  );\n}`,
         prompt: "Que représente la prop spéciale children dans ce composant ?",
         options: [
-          "Une erreur, children n'est pas une prop valide",
-          "Tout ce qui est placé ENTRE les balises d'ouverture et de fermeture du composant quand on l'utilise (ex: <Carte>...</Carte>), automatiquement passé comme prop children",
-          "La liste des composants enfants dans le DOM",
-          "Une prop qu'il faut obligatoirement fournir explicitement"
+          "Le contenu placé entre les balises du composant",
+          "La liste des nœuds enfants présents dans le DOM",
+          "Une prop obligatoire à fournir explicitement",
+          "Une erreur : children n'est pas une prop valide"
         ],
-        correct: 1,
+        correct: 0,
         explain: "children est une prop implicite : React place automatiquement tout contenu JSX imbriqué entre les balises d'un composant dans cette prop, sans qu'on ait à la passer explicitement — c'est le mécanisme de composition de base de React."
       },
       {
         concept: "composants",
         prompt: "Pourquoi le nom d'un composant React doit-il commencer par une majuscule (ex: Carte, pas carte) ?",
         options: [
-          "C'est juste une convention de style sans effet réel",
-          "JSX utilise la casse pour distinguer un composant (MaBalise) d'une balise HTML native (mabalise) — une minuscule est toujours interprétée comme un élément HTML standard",
-          "React refuse de compiler sinon",
-          "Ça n'a d'importance qu'en TypeScript"
+          "Une simple convention de style, sans effet",
+          "Sinon React refuse tout simplement de compiler",
+          "Utile uniquement quand on écrit du TypeScript",
+          "JSX lit la casse : minuscule = balise HTML, majuscule = composant"
         ],
-        correct: 1,
+        correct: 3,
         explain: "C'est une règle de JSX, pas juste une convention : <carte /> serait interprété comme une balise HTML inconnue, tandis que <Carte /> (majuscule) est reconnu comme référence au composant JavaScript Carte."
       },
       {
@@ -1979,12 +1979,12 @@ const MODULES = [
         code: `function ListeUtilisateurs({ utilisateurs }) {\n  return (\n    <ul>\n      {utilisateurs.map(u => <li>{u.nom}</li>)}\n    </ul>\n  );\n}`,
         prompt: "Quel avertissement React apparaît dans la console avec ce code, et pourquoi ?",
         options: [
-          "Aucun avertissement, le code est parfait",
-          "\"Each child in a list should have a unique key prop\" — chaque élément généré par map dans une liste doit avoir une prop key stable pour aider React à réconcilier le DOM efficacement",
-          "React refuse d'afficher la liste",
-          "Un avertissement de performance sur map lui-même"
+          "Aucun avertissement, le code fonctionne parfaitement",
+          "React inverse l'ordre des éléments à chaque rendu",
+          "« Each child should have a unique key » — il manque key",
+          "Un avertissement signalant que map est trop lent"
         ],
-        correct: 1,
+        correct: 2,
         explain: "React exige une key unique et stable sur chaque élément généré dynamiquement dans une liste (typiquement via map), pour identifier quel élément a changé/été ajouté/supprimé — ici il manque key={u.id} sur le <li>."
       },
       {
@@ -1992,12 +1992,12 @@ const MODULES = [
         code: `function Liste() {\n  return (\n    <>\n      <li>Un</li>\n      <li>Deux</li>\n    </>\n  );\n}`,
         prompt: "À quoi sert la syntaxe <>...</> (Fragment) ici ?",
         options: [
-          "C'est une erreur de syntaxe",
-          "Grouper plusieurs éléments JSX SANS ajouter de nœud DOM supplémentaire — utile par exemple pour produire des <li> directement enfants d'un <ul> parent, sans un <div> parasite",
-          "Ça transforme les éléments en tableau",
-          "Ça rend les enfants invisibles"
+          "Grouper des éléments sans ajouter de nœud au DOM",
+          "C'est une erreur de syntaxe JSX invalide",
+          "Transformer les éléments en un tableau JavaScript",
+          "Rendre les éléments enfants invisibles à l'écran"
         ],
-        correct: 1,
+        correct: 0,
         explain: "JSX exige un seul élément racine par retour. Sans Fragment, il faudrait envelopper dans un <div>, ce qui ajouterait un nœud DOM réel. <> </> groupe sans rien ajouter au DOM final."
       },
       {
@@ -2005,12 +2005,12 @@ const MODULES = [
         code: `function Statut({ connecte }) {\n  return connecte ? <p>En ligne</p> : null;\n}`,
         prompt: "Que se passe-t-il visuellement quand un composant renvoie null ?",
         options: [
-          "Une erreur s'affiche",
-          "React n'affiche RIEN à cet endroit — null (comme false ou undefined) est une valeur de retour JSX valide signifiant \"ne rien rendre ici\"",
-          "Le composant précédent reste affiché",
-          "null est converti en la chaîne \"null\" affichée à l'écran"
+          "React lève une erreur pendant le rendu",
+          "Le rendu précédent du composant reste affiché",
+          "La chaîne « null » s'affiche à l'écran",
+          "React n'affiche rien ici (null = « ne rien rendre »)"
         ],
-        correct: 1,
+        correct: 3,
         explain: "React traite null, undefined, false comme des instructions \"ne rien afficher\" — contrairement à 0 ou une chaîne vide qui, elles, produisent un rendu (0 est visible !). C'est le patron standard pour un rendu conditionnel qui n'affiche parfois rien du tout."
       },
       {
@@ -2018,19 +2018,19 @@ const MODULES = [
         prompt: "Que fait le hook useState ?",
         options: [
           "Il exécute un effet de bord après le rendu",
-          "Il déclare une variable d'état locale au composant, qui déclenche un re-rendu quand elle change",
-          "Il mémorise une fonction pour éviter de la recréer",
-          "Il donne un accès direct au DOM"
+          "Il mémorise une fonction pour ne pas la recréer",
+          "Il déclare un état local qui re-rend quand il change",
+          "Il donne un accès direct au nœud DOM"
         ],
-        correct: 1,
+        correct: 2,
         explain: "useState renvoie une paire [valeur, fonctionDeMiseÀJour]. Appeler cette fonction met à jour la valeur ET déclenche un nouveau rendu du composant pour refléter ce changement à l'écran."
       },
       {
         concept: "effets",
         code: `useEffect(() => {\n  console.log("monté");\n}, []);`,
         prompt: "Quand ce useEffect s'exécute-t-il, avec un tableau de dépendances vide ?",
-        options: ["À chaque rendu", "Jamais", "Une seule fois, juste après le premier rendu (montage)", "Uniquement au démontage du composant"],
-        correct: 2,
+        options: ["Avant chaque rendu du composant", "Une seule fois, après le premier rendu", "Jamais : le tableau vide le désactive", "Uniquement au démontage du composant"],
+        correct: 1,
         explain: "Un tableau de dépendances vide [ ] signifie \"aucune dépendance ne change jamais\" : l'effet ne s'exécute donc qu'une seule fois, immédiatement après le premier rendu du composant (équivalent du montage)."
       },
       {
@@ -2038,12 +2038,12 @@ const MODULES = [
         code: `useEffect(() => {\n  const id = setInterval(() => setCount(c => c + 1), 1000);\n  return () => clearInterval(id);\n}, []);`,
         prompt: "À quoi sert la fonction renvoyée par ce useEffect ?",
         options: [
-          "Elle ne sert à rien, c'est optionnel",
-          "C'est une fonction de nettoyage (cleanup) : React l'appelle avant de ré-exécuter l'effet, ou au démontage du composant, pour éviter les fuites (ici, arrêter l'interval)",
-          "Elle remplace le tableau de dépendances",
-          "Elle s'exécute avant l'effet lui-même, pas après"
+          "Rien, cette fonction est purement optionnelle",
+          "Elle remplace le tableau de dépendances de l'effet",
+          "Elle s'exécute avant l'effet, jamais après",
+          "Un nettoyage appelé au démontage (ici : stopper l'interval)"
         ],
-        correct: 1,
+        correct: 3,
         explain: "Une fonction renvoyée par useEffect est sa fonction de nettoyage. React l'appelle automatiquement au démontage du composant (ou avant de relancer l'effet si les dépendances changent), ce qui évite ici qu'un setInterval continue de tourner après que le composant a disparu de l'écran."
       },
       {
@@ -2051,12 +2051,12 @@ const MODULES = [
         code: `useEffect(() => {\n  console.log("effet");\n}, [userId]);`,
         prompt: "Quand cet effet se ré-exécute-t-il ?",
         options: [
-          "À chaque rendu, quoi qu'il arrive",
-          "Uniquement quand la valeur de userId change entre deux rendus",
-          "Jamais après le premier rendu",
+          "Seulement quand la valeur de userId change",
+          "À chaque rendu du composant, quoi qu'il arrive",
+          "Jamais après le tout premier rendu",
           "Uniquement quand le composant est redémonté"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Le tableau de dépendances [userId] dit à React de comparer la valeur de userId entre deux rendus : l'effet ne se ré-exécute QUE si elle a changé. C'est le comportement intermédiaire entre [] (jamais) et l'absence de tableau (à chaque rendu)."
       },
       {
@@ -2064,22 +2064,22 @@ const MODULES = [
         code: `useEffect(() => {\n  fetchDonnees(id).then(setDonnees);\n});`,
         prompt: "Que manque-t-il à cet useEffect, et quel problème ça cause ?",
         options: [
-          "Rien ne manque",
-          "Il manque le tableau de dépendances (même vide [] à minima) : sans lui, l'effet se ré-exécute après CHAQUE rendu, refaisant l'appel réseau en boucle si setDonnees déclenche lui-même un nouveau rendu",
-          "Il manque un return",
-          "fetchDonnees doit être awaité"
+          "Rien ne manque, ce code est correct",
+          "Il manque juste un return de nettoyage",
+          "Le tableau de deps : sans lui, l'effet boucle à chaque rendu",
+          "Il manque un await devant fetchDonnees"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Sans second argument, useEffect s'exécute après CHAQUE rendu. Ici, l'effet appelle setDonnees qui déclenche un nouveau rendu, qui relance l'effet, qui rappelle setDonnees... Ajouter [id] comme dépendances limiterait l'exécution aux seuls changements réels de id."
       },
       {
         concept: "effets",
         prompt: "Un useEffect peut-il directement être une fonction async (useEffect(async () => {...})) ?",
         options: [
-          "Oui, c'est la façon recommandée de faire un appel réseau dans un effet",
-          "Non — useEffect attend que sa fonction renvoie SOIT rien, SOIT une fonction de nettoyage ; une fonction async renvoie toujours une Promise, ce qui n'est pas un nettoyage valide. Il faut définir une fonction async à l'intérieur de l'effet et l'appeler",
-          "Oui, mais uniquement en React 18+",
-          "Non, il faut obligatoirement utiliser des Promises manuelles avec .then"
+          "Oui, c'est la façon recommandée pour un fetch",
+          "Non : le callback renverrait une Promise, pas un nettoyage",
+          "Oui, mais seulement depuis React 18 et plus",
+          "Non, il faut des .then manuels obligatoirement"
         ],
         correct: 1,
         explain: "useEffect(async () => {...}) est un anti-pattern : le callback d'effet doit renvoyer undefined ou une fonction de cleanup, jamais une Promise. Le contournement standard : useEffect(() => { async function charger() {...}; charger(); }, [deps])."
@@ -2089,12 +2089,12 @@ const MODULES = [
         code: `function Chat({ salleId }) {\n  useEffect(() => {\n    const connexion = creerConnexion(salleId);\n    connexion.ouvrir();\n    return () => connexion.fermer();\n  }, [salleId]);\n}`,
         prompt: "Que se passe-t-il si salleId change alors que le composant Chat reste monté ?",
         options: [
-          "Rien, l'effet ne se ré-exécute jamais après le montage",
-          "React exécute D'ABORD la fonction de nettoyage de l'effet PRÉCÉDENT (fermant l'ancienne connexion), PUIS relance l'effet avec la nouvelle valeur — jamais les deux connexions ouvertes en même temps",
-          "L'ancienne ET la nouvelle connexion restent ouvertes simultanément",
-          "Le composant plante"
+          "Rien : l'effet ne se relance jamais après le montage",
+          "Les deux connexions restent ouvertes simultanément",
+          "Le composant plante avec une erreur fatale",
+          "React ferme l'ancienne connexion, puis rouvre avec la nouvelle"
         ],
-        correct: 1,
+        correct: 3,
         explain: "À chaque changement d'une dépendance, React nettoie TOUJOURS l'effet précédent avant d'exécuter le nouveau — garantissant qu'une seule connexion est active à la fois, sans fuite ni doublon, même en changeant rapidement de salle."
       },
       {
@@ -2102,24 +2102,24 @@ const MODULES = [
         code: `useEffect(() => {\n  document.title = \`\${nonLues} messages non lus\`;\n}, [nonLues]);`,
         prompt: "Pourquoi cette mise à jour de document.title doit-elle passer par un useEffect plutôt que d'être faite directement dans le corps du composant ?",
         options: [
-          "Ça n'a pas d'importance, les deux fonctionnent identiquement",
-          "document.title modifie quelque chose EN DEHORS de React (le DOM directement) — c'est un effet de bord, et useEffect garantit que cette modification a lieu APRÈS le rendu, pas pendant",
-          "useEffect est obligatoire pour toute ligne de code dans un composant",
-          "document.title ne peut être modifié qu'au montage"
+          "C'est un effet de bord : useEffect l'exécute après le rendu",
+          "Aucune importance : les deux se valent exactement",
+          "useEffect est requis pour toute ligne d'un composant",
+          "document.title n'est modifiable qu'au montage"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Le corps d'un composant doit rester une fonction \"pure\" de rendu, sans effets de bord directs sur le monde extérieur. useEffect isole explicitement ces effets, exécutés après le rendu, respectant ce contrat de pureté."
       },
       {
         concept: "props",
         prompt: "Quelle règle s'applique aux props reçues par un composant enfant ?",
         options: [
-          "L'enfant peut les modifier directement",
-          "Elles sont en lecture seule (immuables) du point de vue de l'enfant qui les reçoit",
-          "Elles remplacent complètement le state",
-          "Elles ne servent qu'à passer des styles"
+          "L'enfant peut les modifier librement à tout moment",
+          "Elles remplacent entièrement le state local du composant",
+          "Elles sont en lecture seule du point de vue de l'enfant",
+          "Elles ne servent qu'à transmettre des styles CSS"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Les props descendent du parent vers l'enfant et sont en lecture seule : un composant enfant ne doit jamais modifier directement une prop reçue. Pour changer une donnée, il faut passer par le state (souvent géré par le parent)."
       },
       {
@@ -2127,10 +2127,10 @@ const MODULES = [
         code: `function Bouton({ onClick, label = "Cliquer" }) {\n  return <button onClick={onClick}>{label}</button>;\n}`,
         prompt: "Que se passe-t-il si on utilise <Bouton onClick={...} /> sans passer label ?",
         options: [
-          "Erreur : label est obligatoire",
-          "label prend sa valeur par défaut \"Cliquer\" (déstructurée avec valeur par défaut), le bouton affiche donc \"Cliquer\"",
+          "Erreur : la prop label est obligatoire ici",
+          "label prend sa valeur par défaut « Cliquer »",
           "Le bouton ne s'affiche pas du tout",
-          "label vaut undefined et rien ne s'affiche"
+          "label vaut undefined et le bouton reste vide"
         ],
         correct: 1,
         explain: "La déstructuration des props avec valeur par défaut ({ label = \"Cliquer\" }) fonctionne exactement comme pour un paramètre de fonction classique : si label n'est pas fourni par le parent, la valeur par défaut s'applique."
@@ -2141,23 +2141,23 @@ const MODULES = [
         prompt: "Pourquoi la ligne props.nom = \"Modifié\" est-elle une mauvaise pratique en React ?",
         options: [
           "C'est en fait recommandé pour optimiser le rendu",
-          "Les props sont immuables par convention : le composant enfant ne doit jamais les modifier directement — pour changer une donnée affichée, il faut passer par le state du parent qui possède réellement cette donnée",
-          "Ça provoque une erreur de syntaxe",
-          "props.nom ne peut techniquement pas être réassigné (erreur JS)"
+          "Ça provoque immédiatement une erreur de syntaxe",
+          "props.nom ne peut techniquement pas être réassigné",
+          "Les props sont en lecture seule : passer par le state du parent"
         ],
-        correct: 1,
+        correct: 3,
         explain: "Rien n'empêche techniquement JavaScript de faire props.nom = ..., mais ça viole le contrat React : les props représentent des données possédées par le PARENT, transmises en lecture seule. Les modifier localement crée des incohérences (le parent ne voit jamais ce changement, et un futur re-rendu l'écrase)."
       },
       {
         concept: "props",
         prompt: "Comment un composant enfant peut-il PRÉVENIR son parent d'un événement, puisque les props ne circulent que du parent vers l'enfant ?",
         options: [
-          "C'est impossible en React",
-          "Le parent passe une fonction callback en prop à l'enfant (ex: onValider), que l'enfant appelle au bon moment — la communication \"remonte\" ainsi via l'exécution d'une fonction, pas via une prop qui changerait de sens",
-          "L'enfant modifie directement une prop du parent",
-          "Il faut obligatoirement utiliser Redux"
+          "Le parent passe un callback en prop, que l'enfant appelle",
+          "C'est tout simplement impossible à faire en React",
+          "L'enfant modifie directement une prop reçue du parent",
+          "Il faut obligatoirement passer par Redux"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Le flux de données reste toujours parent → enfant (props), mais un enfant peut \"communiquer vers le haut\" en appelant une fonction que le parent lui a passée en prop. C'est le patron standard pour faire réagir un parent à un événement de son enfant."
       },
       {
@@ -2165,10 +2165,10 @@ const MODULES = [
         code: `function Avatar(props) {\n  return <img {...props} className="avatar" />;\n}`,
         prompt: "Que fait le spread {...props} directement dans une balise JSX ?",
         options: [
-          "C'est une erreur de syntaxe",
-          "Il étale TOUTES les props reçues comme attributs individuels sur la balise img — pratique pour un composant \"wrapper\" qui transmet des props sans toutes les nommer explicitement",
-          "Ça copie uniquement la prop className",
-          "Ça transforme props en une chaîne"
+          "C'est une erreur de syntaxe dans le JSX",
+          "Il étale chaque prop reçue comme attribut de la balise",
+          "Il ne copie que la seule prop className",
+          "Il convertit l'objet props en chaîne de caractères"
         ],
         correct: 1,
         explain: "{...props} dans du JSX répercute chaque prop reçue comme un attribut séparé sur l'élément. Pratique pour des composants génériques qui enveloppent un élément HTML sans lister chaque prop possible."
@@ -2178,12 +2178,12 @@ const MODULES = [
         code: `function BoutonDanger({ onClick, enfant }) {\n  return <button className="danger" onClick={onClick}>{enfant}</button>;\n}`,
         prompt: "Pourquoi préférer children (implicite) à une prop custom comme enfant ici ?",
         options: [
-          "Il n'y a aucune différence pratique",
-          "children est la convention React standard, comprise par tous, et permet la syntaxe naturelle <BoutonDanger>Supprimer</BoutonDanger> plutôt que <BoutonDanger enfant=\"Supprimer\" />",
-          "enfant est plus performant",
-          "children est réservé aux composants de classe uniquement"
+          "Aucune différence pratique entre les deux approches",
+          "La prop enfant est nettement plus performante",
+          "children est la convention standard : <Bouton>Texte</Bouton>",
+          "children n'existe que dans les composants de classe"
         ],
-        correct: 1,
+        correct: 2,
         explain: "children est la prop implicite standard de React, alimentée automatiquement par le contenu entre les balises d'un composant. Une prop custom comme enfant fonctionnerait techniquement, mais oblige une syntaxe moins naturelle et surprend quiconque connaît déjà la convention React."
       },
       {
@@ -2191,22 +2191,22 @@ const MODULES = [
         code: `items.map(item => <li key={item.id}>{item.label}</li>)`,
         prompt: "Pourquoi utiliser une key unique sur chaque élément d'une liste ?",
         options: [
-          "Uniquement pour le style CSS",
-          "Pour aider React à identifier efficacement quel élément a changé, a été ajouté ou supprimé lors du diffing",
-          "C'est juste une convention sans effet réel",
-          "Pour trier automatiquement la liste"
+          "Uniquement pour pouvoir appliquer du style CSS",
+          "C'est une convention sans aucun effet réel",
+          "Pour trier automatiquement les éléments de la liste",
+          "Aider React à repérer l'élément ajouté, changé ou supprimé"
         ],
-        correct: 1,
+        correct: 3,
         explain: "La key donne à React une identité stable pour chaque élément de liste. Sans clé fiable (ou avec l'index comme clé sur une liste qui change d'ordre), React peut mal réconcilier le DOM et provoquer des bugs ou des pertes de performance."
       },
       {
         concept: "hooks",
         prompt: "Que fait le hook useMemo ?",
         options: [
-          "Il mémorise une valeur calculée et ne la recalcule que si ses dépendances changent",
-          "Il force un nouveau rendu à chaque appel",
-          "Il remplace complètement useState",
-          "Il ne sert que pour les appels réseau"
+          "Il mémorise une valeur, recalculée si une dépendance change",
+          "Il force le composant à se re-rendre à chaque appel",
+          "Il remplace le hook useState dans tous les cas",
+          "Il ne sert qu'à effectuer des appels réseau"
         ],
         correct: 0,
         explain: "useMemo met en cache le résultat d'un calcul coûteux entre les rendus, et ne le recalcule que si une de ses dépendances change. C'est une optimisation de performance, à utiliser quand le calcul est réellement coûteux."
@@ -2216,10 +2216,10 @@ const MODULES = [
         code: `function useCompteur(initial = 0) {\n  const [n, setN] = useState(initial);\n  const incrementer = () => setN(n => n + 1);\n  return { n, incrementer };\n}`,
         prompt: "Qu'est-ce qu'un \"custom hook\" comme useCompteur ici ?",
         options: [
-          "Une fonction React intégrée",
-          "Une fonction JavaScript ordinaire (dont le nom commence par use, par convention) qui utilise d'autres hooks à l'intérieur — elle permet de réutiliser une logique à état entre plusieurs composants",
-          "Un composant React sans JSX",
-          "Une classe qui remplace useState"
+          "Une fonction React intégrée au framework lui-même",
+          "Une fonction qui appelle d'autres hooks pour réutiliser une logique",
+          "Un composant React qui ne retourne pas de JSX",
+          "Une classe qui vient remplacer le hook useState"
         ],
         correct: 1,
         explain: "Un custom hook est juste une fonction qui appelle d'autres hooks (ici useState) — le préfixe use est une convention qui permet à React (et aux linters) de vérifier les règles des hooks. Ça permet d'extraire et réutiliser une logique à état sans dupliquer de code entre composants."
@@ -2229,22 +2229,22 @@ const MODULES = [
         code: `function Chercheur() {\n  const [terme, setTerme] = useState("");\n  const resultatsFiltres = useMemo(() => {\n    return grosseListe.filter(item => item.includes(terme));\n  }, [terme]);\n}`,
         prompt: "Que se passerait-il si on retirait useMemo (en calculant resultatsFiltres directement à chaque rendu) ?",
         options: [
-          "Rien ne changerait, useMemo n'a aucun effet réel",
-          "Le filtre sur grosseListe serait recalculé à CHAQUE rendu du composant, même pour des changements d'état qui n'ont rien à voir avec terme — coûteux si la liste est grande",
-          "L'application planterait",
+          "Rien : useMemo n'a en réalité aucun effet ici",
+          "L'application entière planterait dès le rendu",
+          "Le filtre serait relancé à chaque rendu, même hors terme",
           "useMemo est obligatoire dès qu'on utilise filter"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Sans useMemo, chaque rendu de Chercheur (déclenché par n'importe quel changement d'état du composant) relancerait le filtre sur toute grosseListe. useMemo ne recalcule que si une dépendance listée (ici terme) a changé — une vraie optimisation quand le calcul est coûteux."
       },
       {
         concept: "hooks",
         prompt: "Pourquoi les hooks React (useState, useEffect...) ne doivent-ils JAMAIS être appelés à l'intérieur d'une condition ou d'une boucle ?",
         options: [
-          "C'est juste une recommandation de style, sans conséquence réelle",
-          "React associe chaque hook à sa POSITION dans l'ordre d'appel entre les rendus — un appel conditionnel changerait cet ordre d'un rendu à l'autre, cassant l'association entre le hook et son état interne",
-          "Les hooks conditionnels ralentissent l'application",
-          "Ça ne concerne que useEffect, pas useState"
+          "Une simple recommandation de style, sans conséquence",
+          "React suit les hooks par ordre d'appel : les sauter casse tout",
+          "Les hooks conditionnels ralentissent nettement l'application",
+          "Ça ne concerne que useEffect, jamais useState"
         ],
         correct: 1,
         explain: "React ne suit PAS les hooks par nom mais par ORDRE D'APPEL au sein d'un rendu. Si un if fait sauter un hook selon les cas, l'ordre change entre deux rendus et React associe le mauvais état interne au mauvais hook — d'où la règle stricte : toujours les mêmes hooks, dans le même ordre, à chaque rendu."
@@ -2254,12 +2254,12 @@ const MODULES = [
         code: `function Formulaire() {\n  const inputRef = useRef(null);\n  function focaliser() {\n    inputRef.current.focus();\n  }\n  return <input ref={inputRef} />;\n}`,
         prompt: "Que fait le hook useRef ici, et en quoi diffère-t-il de useState ?",
         options: [
-          "useRef déclenche un re-rendu à chaque changement, comme useState",
-          "useRef crée une référence MUTABLE (.current) qui persiste entre les rendus SANS déclencher de nouveau rendu quand elle change — ici utilisée pour accéder directement au nœud DOM réel de l'input",
-          "useRef ne peut être utilisé qu'avec des éléments DOM",
-          "useRef et useState sont strictement interchangeables"
+          "Il déclenche un re-rendu à chaque changement, comme useState",
+          "Il ne fonctionne qu'avec des éléments du DOM",
+          "Il est strictement interchangeable avec useState",
+          "Une référence mutable (.current) qui persiste sans re-rendu"
         ],
-        correct: 1,
+        correct: 3,
         explain: "Contrairement à useState, modifier ref.current ne provoque PAS de re-rendu — useRef sert à stocker une valeur mutable qui survit entre les rendus sans faire partie du cycle de rendu React."
       },
       {
@@ -2267,10 +2267,10 @@ const MODULES = [
         code: `function Parent() {\n  const gererClic = useCallback(() => {\n    console.log("clic");\n  }, []);\n  return <EnfantMemoise onClic={gererClic} />;\n}`,
         prompt: "À quoi sert useCallback ici, avec un enfant \"mémoïsé\" (React.memo) ?",
         options: [
-          "Il mémorise le RÉSULTAT d'un calcul, comme useMemo",
-          "Il mémorise la RÉFÉRENCE de la fonction elle-même entre les rendus : sans lui, gererClic serait une NOUVELLE fonction à chaque rendu, cassant l'optimisation de EnfantMemoise (qui compare ses props par référence)",
-          "Il rend la fonction asynchrone",
-          "useCallback n'a aucun effet réel sur les performances"
+          "Il mémorise le résultat d'un calcul, comme useMemo",
+          "Il fige la référence de la fonction entre les rendus",
+          "Il transforme la fonction en fonction asynchrone",
+          "Il n'a aucun effet réel sur les performances"
         ],
         correct: 1,
         explain: "Chaque rendu de Parent recrée normalement gererClic en tant que nouvelle fonction. Si EnfantMemoise est enveloppé dans React.memo, cette nouvelle référence à chaque fois annulerait l'optimisation. useCallback fige la référence tant que les dépendances ne changent pas."
@@ -2279,12 +2279,12 @@ const MODULES = [
         concept: "state",
         prompt: "Quelle est la différence entre un input \"contrôlé\" et \"non contrôlé\" en React ?",
         options: [
-          "Aucune différence",
-          "Contrôlé : la valeur de l'input est pilotée par le state React via value + onChange. Non contrôlé : le DOM gère lui-même sa valeur (accès via une ref)",
+          "Aucune différence réelle entre les deux types",
           "Un input contrôlé ne peut jamais être modifié par l'utilisateur",
+          "Contrôlé : piloté par le state (value+onChange) ; non contrôlé : par le DOM",
           "Les inputs non contrôlés sont interdits en React"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Un input contrôlé synchronise sa valeur avec le state à chaque frappe (value={state}, onChange={...}), ce qui donne un contrôle total. Un input non contrôlé laisse le DOM gérer sa propre valeur, qu'on récupère ponctuellement via une ref."
       },
       {
@@ -2292,12 +2292,12 @@ const MODULES = [
         code: `const [utilisateur, setUtilisateur] = useState({ nom: "Ana", age: 30 });\nsetUtilisateur({ ...utilisateur, age: 31 });`,
         prompt: "Pourquoi recrée-t-on tout l'objet ({ ...utilisateur, age: 31 }) plutôt que de faire utilisateur.age = 31 directement ?",
         options: [
-          "utilisateur.age = 31 fonctionnerait aussi bien",
-          "React détecte les changements de state par comparaison de RÉFÉRENCE : muter l'objet existant ne change pas sa référence, donc React ne verrait aucune différence et ne re-rendrait pas le composant",
-          "C'est juste une question de style",
-          "setUtilisateur exige toujours un tableau"
+          "React compare le state par référence : muter ne la change pas",
+          "utilisateur.age = 31 fonctionnerait tout aussi bien",
+          "C'est purement une question de style de code",
+          "setUtilisateur exige toujours de recevoir un tableau"
         ],
-        correct: 1,
+        correct: 0,
         explain: "React compare l'ancien et le nouveau state par référence (===), pas par contenu profond. Muter l'objet en place garde la MÊME référence — React ne détecte donc aucun changement. Il faut toujours créer un nouvel objet/tableau pour que React remarque la mise à jour."
       },
       {
@@ -2305,10 +2305,10 @@ const MODULES = [
         code: `const [n, setN] = useState(0);\nfunction incrementerDeuxFois() {\n  setN(n + 1);\n  setN(n + 1);\n}`,
         prompt: "Après un clic déclenchant incrementerDeuxFois(), n augmente-t-il de 2 ?",
         options: [
-          "Oui, toujours",
-          "Non, seulement de 1 : les deux appels utilisent la MÊME valeur n capturée au moment du rendu — il faut la forme fonctionnelle setN(prev => prev + 1) pour chaîner correctement les mises à jour",
-          "Ça dépend du navigateur",
-          "n augmente de 2, mais avec un rendu de retard"
+          "Oui, n augmente toujours de 2 après le clic",
+          "Non, de 1 : les deux lisent le même n (utiliser prev => prev + 1)",
+          "Ça dépend entièrement du navigateur utilisé",
+          "De 2, mais avec un rendu de retard"
         ],
         correct: 1,
         explain: "Les deux setN(n + 1) lisent la même valeur n figée au moment du rendu courant — le second appel écrase le premier avec le même résultat. setN(prev => prev + 1) résout ce piège en basant chaque mise à jour sur la valeur la plus récente, pas sur celle capturée au rendu."
@@ -2318,12 +2318,12 @@ const MODULES = [
         code: `function Formulaire() {\n  const [nom, setNom] = useState("");\n  const [email, setEmail] = useState("");\n  const [age, setAge] = useState(0);\n}`,
         prompt: "Pourquoi utiliser TROIS useState séparés plutôt qu'un seul useState({ nom, email, age }) ?",
         options: [
-          "Ça n'a aucune importance, les deux approches sont strictement équivalentes",
-          "Avec un état séparé par champ, mettre à jour nom ne touche que cette variable ; avec un objet unique, le setter REMPLACE tout l'état (pas de fusion automatique), obligeant à spread manuellement les autres champs à chaque mise à jour",
-          "React limite à 3 useState par composant",
-          "Un objet useState est toujours plus rapide"
+          "Aucune importance : les deux sont strictement équivalents",
+          "React limite de toute façon à trois useState par composant",
+          "Le setter d'un objet remplace tout : il faut spread les champs",
+          "Un état en objet unique est toujours plus rapide"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Contrairement à this.setState des composants de classe (qui fusionnait automatiquement), le setter de useState REMPLACE entièrement la valeur. Un état en objet unique oblige à faire setEtat({...etat, nom: valeur}) à chaque champ modifié — plusieurs useState séparés évitent ce risque d'oubli."
       },
       {
@@ -2331,10 +2331,10 @@ const MODULES = [
         code: `function Compteur() {\n  const [n, setN] = useState(0);\n  function gerer() {\n    setN(n + 1);\n    console.log(n);\n  }\n}`,
         prompt: "Après un clic sur gerer(), que va afficher console.log(n) — la nouvelle valeur ou l'ancienne ?",
         options: [
-          "La nouvelle valeur, immédiatement",
-          "L'ANCIENNE valeur : setN ne met pas à jour n de façon synchrone dans la fonction en cours — n reste la valeur capturée au moment du rendu jusqu'au PROCHAIN rendu",
-          "undefined",
-          "Ça dépend du navigateur"
+          "La nouvelle valeur, disponible immédiatement après setN",
+          "L'ancienne : n reste figé jusqu'au prochain rendu",
+          "undefined, car n n'existe plus après l'appel setN",
+          "Cela dépend entièrement du navigateur utilisé"
         ],
         correct: 1,
         explain: "setN planifie une mise à jour et un futur re-rendu, mais ne modifie PAS la variable n de la fonction actuellement en cours d'exécution — n reste celle capturée au dernier rendu jusqu'à ce que React re-rende le composant avec la nouvelle valeur."
@@ -2343,12 +2343,12 @@ const MODULES = [
         concept: "props",
         prompt: "À quoi sert le Context API de React ?",
         options: [
-          "Gérer le CSS global de l'application",
-          "Partager des données entre composants sans avoir à les passer manuellement à chaque niveau intermédiaire (éviter le \"prop drilling\")",
+          "Gérer la feuille de style CSS globale de l'app",
           "Remplacer systématiquement tout le state local",
-          "Gérer uniquement le routage"
+          "Gérer uniquement le routage entre les pages",
+          "Partager une donnée sans la passer niveau par niveau (prop drilling)"
         ],
-        correct: 1,
+        correct: 3,
         explain: "Le Context API permet de rendre une donnée (thème, utilisateur connecté...) accessible à n'importe quel composant descendant, sans devoir la transmettre explicitement prop par prop à travers chaque niveau intermédiaire."
       },
       {
@@ -2400,7 +2400,7 @@ const MODULES = [
         prompt: "Quel est l'avantage principal de Next.js par rapport à une app React \"classique\" (créée avec Vite seul) ?",
         options: [
           "Il ne sert qu'à faire des sites purement statiques",
-          "Il offre un framework complet : rendu côté serveur (SSR), génération statique (SSG), routage par fichiers et API routes intégrées",
+          "Un framework complet : SSR, SSG, routage fichiers, API routes",
           "Il remplace totalement le JavaScript par un autre langage",
           "Il nécessite obligatoirement une base de données"
         ],
@@ -2412,11 +2412,11 @@ const MODULES = [
         prompt: "Dans l'App Router (dossier app/), comment crée-t-on une nouvelle route /blog ?",
         options: [
           "En créant un fichier blog.js à la racine du projet",
-          "En créant un dossier app/blog/ contenant un fichier page.tsx",
-          "En modifiant uniquement next.config.js",
+          "En modifiant uniquement le fichier next.config.js",
+          "En créant un dossier app/blog/ avec un fichier page.tsx",
           "Ce n'est pas possible avec l'App Router"
         ],
-        correct: 1,
+        correct: 2,
         explain: "L'App Router associe chaque route à un dossier dans app/ contenant un fichier page.tsx (ou .jsx). Le chemin du dossier (app/blog/) détermine directement l'URL (/blog)."
       },
       {
@@ -2424,10 +2424,10 @@ const MODULES = [
         code: `// app/produits/[id]/page.tsx\nexport default function Produit({ params }) {\n  return <p>Produit {params.id}</p>;\n}`,
         prompt: "Que représente le dossier [id] (avec crochets) dans l'App Router ?",
         options: [
-          "Une erreur de nommage",
-          "Un segment de route DYNAMIQUE : /produits/42 et /produits/abc matchent tous les deux ce fichier, avec params.id valant respectivement \"42\" et \"abc\"",
+          "Une erreur de nommage de dossier",
+          "Un segment dynamique : /produits/42 → params.id = \"42\"",
           "Un dossier optionnel qui peut être omis",
-          "Un alias vers un autre dossier"
+          "Un simple alias vers un autre dossier"
         ],
         correct: 1,
         explain: "Les crochets [nom] créent un segment de route dynamique : le fichier gère TOUTES les URLs correspondant à ce motif, et la valeur réelle du segment est injectée dans params.id."
@@ -2437,12 +2437,12 @@ const MODULES = [
         code: `// app/docs/[...slug]/page.tsx\nexport default function Docs({ params }) {\n  return <p>{params.slug.join('/')}</p>;\n}`,
         prompt: "Que représente [...slug] (avec trois points), par rapport à un simple [slug] ?",
         options: [
-          "C'est identique à [slug]",
-          "Un \"catch-all route\" : il capture un NOMBRE VARIABLE de segments d'URL dans un tableau — /docs/a/b/c matche ce fichier, avec params.slug = ['a', 'b', 'c']",
-          "Une erreur de syntaxe",
-          "Ça limite la route à exactement 3 segments"
+          "C'est strictement identique à [slug]",
+          "Une erreur de syntaxe dans le nommage",
+          "Ça limite la route à exactement trois segments",
+          "Un « catch-all » : capture N segments dans un tableau"
         ],
-        correct: 1,
+        correct: 3,
         explain: "[slug] capture UN SEUL segment. [...slug] (catch-all, syntaxe rest) capture N'IMPORTE QUEL NOMBRE de segments restants dans un tableau — utile pour une documentation à profondeur variable, tous gérés par le même fichier."
       },
       {
@@ -2451,9 +2451,9 @@ const MODULES = [
         prompt: "Quand ce fichier spécial not-found.tsx est-il utilisé par Next.js ?",
         options: [
           "Automatiquement pour toute erreur serveur",
-          "Quand le code de la route appelle la fonction notFound() de Next.js (ex: après avoir vérifié que le produit n'existe pas en base) — Next.js affiche alors ce composant à la place de la page normale",
-          "Il remplace next.config.js",
-          "Il ne fonctionne qu'en développement"
+          "Quand la route appelle la fonction notFound() de Next.js",
+          "Il remplace le fichier next.config.js",
+          "Il ne fonctionne qu'en développement local"
         ],
         correct: 1,
         explain: "not-found.tsx définit l'interface affichée quand la fonction notFound() (importée de next/navigation) est appelée explicitement dans le code d'une route — typiquement après une recherche en base infructueuse, pour afficher un vrai 404 personnalisé."
@@ -2462,8 +2462,8 @@ const MODULES = [
         concept: "ssr-ssg",
         prompt: "Quelle est la vraie différence entre un Server Component et un Client Component dans l'App Router ?",
         options: [
-          "Aucune différence",
-          "Le Server Component s'exécute côté serveur et ne peut pas utiliser useState/useEffect, sauf à ajouter la directive \"use client\" pour en faire un Client Component",
+          "Aucune différence réelle entre les deux",
+          "Server : côté serveur, sans useState/useEffect (sauf « use client »)",
           "Le Client Component est toujours plus rapide à charger",
           "Les deux ont exactement les mêmes capacités"
         ],
@@ -2474,12 +2474,12 @@ const MODULES = [
         concept: "api-routes",
         prompt: "Que permet un fichier route.ts placé dans app/api/utilisateurs/ ?",
         options: [
-          "De styliser une page",
-          "De définir un endpoint d'API (GET, POST, etc.) exécuté côté serveur",
-          "De créer un composant React visuel",
+          "De styliser visuellement une page",
+          "De créer un composant React visuel à afficher",
+          "Définir un endpoint d'API (GET, POST…) côté serveur",
           "De configurer directement une base de données"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Un fichier route.ts dans app/api/ exporte des fonctions nommées GET, POST, etc., qui définissent un véritable endpoint d'API REST, exécuté côté serveur — exactement comme une route Express, mais intégrée à Next.js."
       },
       {
@@ -2487,10 +2487,10 @@ const MODULES = [
         code: `// app/api/utilisateurs/route.ts\nexport async function GET(request) {\n  const { searchParams } = new URL(request.url);\n  const tri = searchParams.get("tri");\n  return Response.json({ tri });\n}`,
         prompt: "Comment cette route API lit-elle un paramètre de query string (ex: /api/utilisateurs?tri=asc) ?",
         options: [
-          "Via request.body",
-          "En construisant un objet URL à partir de request.url, puis en lisant searchParams.get(\"tri\") — équivalent de req.query en Express",
+          "Via l'objet request.body de la requête",
+          "Via un objet URL(request.url) puis searchParams.get(\"tri\")",
           "Les query strings ne sont pas supportées dans l'App Router",
-          "Via request.params"
+          "Via l'objet request.params de la requête"
         ],
         correct: 1,
         explain: "Le Web standard Request ne fournit pas directement les query params : il faut reconstruire un objet URL depuis request.url, puis utiliser son searchParams — plus verbeux que req.query d'Express, mais basé sur les standards web."
@@ -2499,12 +2499,12 @@ const MODULES = [
         concept: "api-routes",
         prompt: "Quel avantage y a-t-il à définir une route API dans app/api/ plutôt que d'appeler directement une base de données depuis un Server Component ?",
         options: [
-          "Aucun avantage, c'est redondant",
-          "Une route API expose un endpoint HTTP réutilisable par d'AUTRES clients (app mobile, autre frontend, webhook externe) — alors qu'un Server Component ne sert que le rendu de CETTE page précise",
-          "Les routes API sont toujours plus rapides",
-          "Un Server Component ne peut jamais accéder à une base de données"
+          "Un endpoint HTTP réutilisable par d'autres clients (mobile, webhook)",
+          "Aucun avantage, c'est totalement redondant",
+          "Les routes API sont toujours plus rapides à répondre",
+          "Un Server Component ne peut jamais accéder à une base"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Un Server Component qui interroge directement la base est parfait pour SA propre page, mais n'est pas appelable de l'extérieur. Une route API expose un vrai endpoint HTTP consommable par n'importe quel client — le bon choix dépend de qui doit consommer les données."
       },
       {
@@ -2512,10 +2512,10 @@ const MODULES = [
         code: `// app/api/produits/[id]/route.ts\nexport async function DELETE(request, { params }) {\n  await supprimerProduit(params.id);\n  return new Response(null, { status: 204 });\n}`,
         prompt: "Pourquoi utiliser le statut 204 (No Content) plutôt que 200 pour cette réponse de suppression ?",
         options: [
-          "204 est interdit en dehors de GET",
-          "204 signale explicitement \"succès, mais je n'ai rien à renvoyer dans le corps\" — sémantiquement plus précis que 200 pour une suppression, où il n'y a plus rien de pertinent à retourner",
-          "204 signifie une erreur côté client",
-          "Aucune différence pratique avec 200"
+          "204 est interdit en dehors des requêtes GET",
+          "204 = « succès, mais rien à renvoyer » : idéal après un DELETE",
+          "204 signifie plutôt une erreur côté client",
+          "Aucune différence pratique avec un 200"
         ],
         correct: 1,
         explain: "200 OK sous-entend généralement un corps de réponse pertinent. 204 No Content communique explicitement au client qu'il n'y a pas de contenu à attendre — parfaitement adapté à une opération DELETE réussie."
@@ -2526,8 +2526,8 @@ const MODULES = [
         prompt: "Pourquoi renvoyer explicitement { status: 400 } en cas de validation échouée, plutôt que le statut par défaut (200) ?",
         options: [
           "400 n'a aucun rapport avec la validation",
-          "Un statut HTTP correct permet au CLIENT de distinguer un succès d'un échec par le code lui-même, sans devoir parser le corps de la réponse pour le deviner — les outils HTTP et frameworks frontend s'appuient sur ce code",
-          "200 provoquerait une erreur serveur",
+          "Le client distingue succès/échec par le code, sans parser le corps",
+          "Un statut 200 provoquerait une erreur serveur",
           "Le statut n'a d'importance qu'en développement"
         ],
         correct: 1,
@@ -2538,8 +2538,8 @@ const MODULES = [
         prompt: "Qu'est-ce que le SSG (Static Site Generation) ?",
         options: [
           "Générer le HTML à chaque requête utilisateur",
-          "Générer les pages HTML à l'avance, au moment du build, pour un chargement très rapide",
-          "Ne jamais générer de HTML",
+          "Pré-générer les pages HTML au build, pour un chargement rapide",
+          "Ne jamais générer de HTML du tout",
           "Une technique réservée aux API uniquement"
         ],
         correct: 1,
@@ -2549,22 +2549,22 @@ const MODULES = [
         concept: "ssr-ssg",
         prompt: "Comment récupère-t-on des données côté serveur dans un Server Component de l'App Router ?",
         options: [
-          "Avec useEffect et fetch, comme dans une app React classique",
-          "Simplement avec un appel fetch (ou toute requête asynchrone) directement dans le composant, qui peut être une fonction async",
-          "Avec useState uniquement",
+          "Avec useEffect et fetch, comme en React classique",
+          "Avec le hook useState et lui seul",
+          "Un fetch direct dans le composant, qui peut être async",
           "Il faut obligatoirement utiliser getStaticProps"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Un Server Component peut être une fonction async : on peut donc faire directement await fetch(...) (ou interroger une base de données) au cœur du composant, sans passer par useEffect, puisque le code s'exécute côté serveur avant l'envoi au navigateur."
       },
       {
         concept: "ssr-ssg",
         prompt: "Qu'apporte l'ISR (Incremental Static Regeneration) par rapport au SSG classique ?",
         options: [
-          "Rien de nouveau, c'est un synonyme",
-          "Les pages restent statiques (rapides) MAIS peuvent être régénérées en arrière-plan après un certain délai, sans nécessiter un nouveau build complet du site — un compromis entre la vitesse du SSG et la fraîcheur du SSR",
+          "Rien de nouveau, c'est un simple synonyme",
+          "Pages statiques régénérées en arrière-plan après un délai",
           "ISR ne fonctionne que côté client",
-          "ISR supprime le besoin d'un serveur"
+          "ISR supprime tout besoin de serveur"
         ],
         correct: 1,
         explain: "Avec revalidate: 60 par exemple, une page SSG reste statique et ultra-rapide, mais Next.js la régénère automatiquement en tâche de fond après 60 secondes si une requête arrive — sans exiger de reconstruire tout le site pour mettre à jour une seule page."
@@ -2573,12 +2573,12 @@ const MODULES = [
         concept: "ssr-ssg",
         prompt: "Pourquoi un Server Component peut-il accéder directement à une base de données ou des variables d'environnement secrètes, sans risque de les exposer au navigateur ?",
         options: [
-          "Ce n'est pas possible, il faut toujours passer par une API route",
-          "Un Server Component s'exécute UNIQUEMENT côté serveur : son code n'est jamais envoyé au navigateur — seul le HTML/JSX résultant du rendu l'est",
-          "Les Server Components chiffrent automatiquement les données sensibles",
-          "C'est risqué et déconseillé par Next.js"
+          "Impossible : il faut toujours passer par une API route",
+          "Les Server Components chiffrent les données sensibles",
+          "C'est risqué et fortement déconseillé par Next.js",
+          "Son code s'exécute côté serveur, jamais envoyé au navigateur"
         ],
-        correct: 1,
+        correct: 3,
         explain: "La distinction fondamentale de l'App Router : le CODE d'un Server Component ne quitte jamais le serveur, seul le résultat de son rendu (HTML) est envoyé au client. On peut donc y utiliser en toute sécurité des clés API secrètes ou des requêtes base de données directes, impossible dans un Client Component."
       },
       {
@@ -2586,10 +2586,10 @@ const MODULES = [
         code: `export const dynamic = 'force-dynamic';`,
         prompt: "Placée en haut d'un fichier page.tsx, que force cette ligne ?",
         options: [
-          "Rien, c'est ignoré par Next.js",
-          "Elle désactive tout cache/génération statique pour cette route : la page est recalculée à CHAQUE requête, même si son contenu aurait pu être mis en cache par défaut",
+          "Rien : cette ligne est ignorée par Next.js",
+          "Désactive le cache statique : la page est recalculée à chaque requête",
           "Elle transforme la page en Client Component",
-          "Elle accélère le build"
+          "Elle accélère le build de production"
         ],
         correct: 1,
         explain: "Par défaut, Next.js essaie d'optimiser (cache, génération statique) autant que possible. force-dynamic est un échappatoire explicite pour forcer un rendu serveur à chaque requête — utile pour du contenu qui doit toujours être strictement à jour."
@@ -2599,8 +2599,8 @@ const MODULES = [
         prompt: "Que fait <Link> (next/link) par rapport à une balise <a> classique ?",
         options: [
           "Rien de particulier, c'est purement cosmétique",
-          "Il permet une navigation côté client sans rechargement complet de la page, et précharge la page ciblée",
-          "Il bloque complètement le routage",
+          "Navigation côté client sans rechargement, avec préchargement",
+          "Il bloque complètement le routage de l'app",
           "Il ne fonctionne que pour les liens externes"
         ],
         correct: 1,
@@ -2661,10 +2661,10 @@ const MODULES = [
         concept: "routes-express",
         prompt: "Qu'est-ce qu'Express, en une phrase ?",
         options: [
-          "Une base de données",
-          "Un framework Node.js minimaliste pour créer des serveurs web et des APIs HTTP",
+          "Un système de base de données relationnelle",
+          "Un framework Node.js minimaliste pour serveurs web et APIs",
           "Un framework frontend concurrent de React",
-          "Un outil de build comme Vite"
+          "Un outil de build de bundle comme Vite"
         ],
         correct: 1,
         explain: "Express est une couche fine au-dessus du module http de Node.js, qui simplifie énormément la définition de routes, de middlewares et la gestion des requêtes/réponses HTTP."
@@ -2673,7 +2673,7 @@ const MODULES = [
         concept: "routes-express",
         code: `app.get('/produits/:id', (req, res) => {\n  res.json({ id: req.params.id });\n});`,
         prompt: "Que vaut req.params.id pour une requête GET /produits/42 ?",
-        options: ["undefined", "\"42\" (une chaîne, même si ça ressemble à un nombre)", "42 (un nombre)", "Erreur, il manque un middleware"],
+        options: ["undefined", "\"42\", une chaîne de caractères", "42, un vrai nombre entier", "Erreur : il manque un middleware"],
         correct: 1,
         explain: "Les paramètres d'URL (:id) sont TOUJOURS des chaînes de caractères, jamais automatiquement convertis en nombre. Il faut explicitement faire Number(req.params.id) si un nombre est nécessaire."
       },
@@ -2682,12 +2682,12 @@ const MODULES = [
         code: `const router = express.Router();\nrouter.get('/', (req, res) => res.send("Liste"));\napp.use('/produits', router);`,
         prompt: "À quoi sert express.Router() ici ?",
         options: [
-          "Il remplace complètement l'objet app",
-          "Il permet de regrouper des routes liées dans un module séparé, monté ensuite sous un préfixe commun (/produits) via app.use — utile pour organiser une grosse API en fichiers distincts",
-          "Il ralentit les requêtes pour du rate-limiting",
-          "Il ne fonctionne qu'avec des routes GET"
+          "Il remplace complètement l'objet app principal",
+          "Il ralentit les requêtes pour faire du rate-limiting",
+          "Regrouper des routes liées, montées sous un préfixe commun",
+          "Il ne fonctionne qu'avec des routes de type GET"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Router() crée un \"mini-app\" Express indépendante, avec ses propres routes, qu'on peut définir dans un fichier séparé puis monter sur l'app principale avec un préfixe. C'est le mécanisme standard pour structurer une grosse API sans tout entasser dans un seul fichier."
       },
       {
@@ -2696,7 +2696,7 @@ const MODULES = [
         prompt: "Pourquoi l'ORDRE de déclaration de ces deux routes est-il important ?",
         options: [
           "L'ordre n'a aucune importance en Express",
-          "Express teste les routes dans l'ORDRE de déclaration et s'arrête à la première qui matche : si /produits/:id était déclarée AVANT, une requête vers /produits/nouveau matcherait :id (id=\"nouveau\") et n'atteindrait jamais la route dédiée",
+          "Express s'arrête à la 1re route qui matche : :id capterait /nouveau",
           "Express trie automatiquement les routes par spécificité",
           "Seule la dernière route déclarée est jamais utilisée"
         ],
@@ -2709,11 +2709,11 @@ const MODULES = [
         prompt: "Quel avantage app.route(...).get().put().delete() offre-t-il par rapport à trois app.get/put/delete séparés ?",
         options: [
           "Aucun avantage réel, c'est juste plus court à taper",
-          "Il regroupe visuellement toutes les méthodes HTTP pour un MÊME chemin, évitant de répéter le chemin trois fois et rendant explicite que ces routes concernent la même ressource",
-          "Il exécute les trois handlers en même temps pour chaque requête",
-          "Il ne fonctionne qu'avec des routes statiques"
+          "Il exécute les trois handlers en même temps par requête",
+          "Il ne fonctionne qu'avec des routes statiques",
+          "Regrouper les méthodes HTTP d'un même chemin sans le répéter"
         ],
-        correct: 1,
+        correct: 3,
         explain: "app.route(chemin) crée un point d'ancrage réutilisable pour chaîner plusieurs méthodes HTTP sur le MÊME chemin, sans le répéter — purement une question de lisibilité et de regroupement logique des routes qui manipulent la même ressource."
       },
       {
@@ -2721,9 +2721,9 @@ const MODULES = [
         code: `app.use(express.json());`,
         prompt: "Que fait précisément cette ligne ?",
         options: [
-          "Elle sert des fichiers statiques",
-          "Elle active un middleware qui parse automatiquement le corps JSON des requêtes entrantes, le rendant disponible via req.body",
-          "Elle crée une nouvelle route",
+          "Elle sert des fichiers statiques au client",
+          "Un middleware qui parse le JSON entrant dans req.body",
+          "Elle crée une nouvelle route dans l'app",
           "Elle configure la connexion à la base de données"
         ],
         correct: 1,
@@ -2740,12 +2740,12 @@ const MODULES = [
         concept: "middlewares",
         prompt: "Qu'est-ce qu'un middleware en Express ?",
         options: [
-          "Une base de données intermédiaire",
-          "Une fonction ayant accès à la requête, la réponse, et à la fonction next, exécutée dans la chaîne de traitement d'une requête",
-          "Un type de route réservé uniquement à la gestion des erreurs",
-          "Un plugin de build"
+          "Une fonction (req, res, next) dans la chaîne de traitement",
+          "Une base de données intermédiaire servant de cache",
+          "Un type de route réservé à la gestion des erreurs",
+          "Un plugin d'outil de build comme Vite"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Un middleware reçoit (req, res, next) et peut inspecter/modifier la requête, répondre directement, ou passer la main au middleware/route suivant via next(). C'est la brique de base de tout traitement Express (auth, logs, parsing...)."
       },
       {
@@ -2753,10 +2753,10 @@ const MODULES = [
         code: `function logger(req, res, next) {\n  console.log(\`\${req.method} \${req.url}\`);\n  next();\n}\napp.use(logger);`,
         prompt: "Que se passerait-il si ce middleware OUBLIAIT d'appeler next() ?",
         options: [
-          "Rien, la requête continuerait normalement",
-          "La requête resterait BLOQUÉE indéfiniment : Express n'appelle jamais automatiquement le middleware/route suivant, c'est au code du middleware de le faire explicitement via next()",
+          "Rien : la requête continuerait normalement",
+          "La requête resterait bloquée : Express n'appelle pas next() seul",
           "Express afficherait une erreur claire immédiatement",
-          "Le serveur planterait"
+          "Le serveur planterait avec une exception"
         ],
         correct: 1,
         explain: "Un middleware qui ne répond pas (res.send/json) ET n'appelle pas next() laisse la requête sans réponse — le client attend indéfiniment. C'est une des erreurs les plus fréquentes en Express : chaque middleware DOIT soit répondre, soit passer la main via next()."
@@ -2766,9 +2766,9 @@ const MODULES = [
         code: `app.use((err, req, res, next) => {\n  console.error(err);\n  res.status(500).json({ erreur: "Erreur serveur" });\n});`,
         prompt: "Comment Express reconnaît-il que CE middleware est un gestionnaire d'ERREURS, et non un middleware classique ?",
         options: [
-          "Grâce à son nom de fonction",
-          "Grâce à sa SIGNATURE À QUATRE ARGUMENTS (err, req, res, next) — Express traite tout middleware déclaré avec 4 paramètres comme un error handler, appelé quand next(erreur) est invoqué en amont",
-          "Il faut le déclarer dans un fichier séparé nommé errors.js",
+          "Grâce au nom donné à la fonction déclarée",
+          "Grâce à sa signature à quatre arguments (err, req, res, next)",
+          "Il faut le déclarer dans un fichier séparé errors.js",
           "Un middleware d'erreur n'existe pas nativement en Express"
         ],
         correct: 1,
@@ -2779,12 +2779,12 @@ const MODULES = [
         code: `app.get('/admin', verifierAuth, verifierRoleAdmin, (req, res) => {\n  res.send("Tableau de bord admin");\n});`,
         prompt: "Que permet de passer PLUSIEURS fonctions middleware avant le handler final d'une route, comme ici ?",
         options: [
-          "C'est une erreur, une route ne peut avoir qu'un seul handler",
-          "Chaque middleware s'exécute dans l'ordre (via next()) avant d'atteindre le handler final : la requête doit passer la vérification d'authentification PUIS celle du rôle admin — chaque étape peut aussi interrompre la chaîne en répondant directement",
-          "Ils s'exécutent tous en parallèle",
-          "Seul le premier middleware compte, les autres sont ignorés"
+          "Erreur : une route n'a qu'un seul handler possible",
+          "Ils s'exécutent tous en parallèle, simultanément",
+          "Ils s'exécutent en ordre (via next) avant le handler final",
+          "Seul le premier compte, les autres sont ignorés"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Express accepte une chaîne de middlewares spécifiques à UNE route, exécutés séquentiellement via next(). Chacun peut soit laisser passer, soit court-circuiter en répondant directement (ex: 401/403) — composant ainsi des vérifications successives sans dupliquer la logique dans le handler final."
       },
       {
@@ -2806,9 +2806,9 @@ const MODULES = [
         prompt: "Pourquoi versionne-t-on souvent une API REST (ex : /api/v1/...) ?",
         options: [
           "Pour ralentir volontairement les requêtes",
-          "Pour pouvoir faire évoluer l'API sans casser les clients qui utilisent encore une ancienne version",
-          "C'est une obligation technique d'Express",
-          "Cela n'a aucun intérêt pratique"
+          "Faire évoluer l'API sans casser les clients existants",
+          "C'est une obligation technique imposée par Express",
+          "Cela n'a en réalité aucun intérêt pratique"
         ],
         correct: 1,
         explain: "Le versionnage (v1, v2...) permet d'introduire des changements majeurs dans une nouvelle version, tout en laissant les applications existantes continuer à fonctionner sur l'ancienne, le temps qu'elles migrent."
@@ -2816,7 +2816,7 @@ const MODULES = [
       {
         concept: "rest",
         prompt: "Dans une API REST bien conçue, quelle méthode HTTP utilise-t-on pour une mise à jour PARTIELLE d'une ressource, par opposition à son remplacement complet ?",
-        options: ["PUT pour les deux cas", "PATCH — PUT remplace la ressource entière, PATCH ne modifie que les champs fournis", "DELETE puis POST", "GET avec un body"],
+        options: ["PUT dans les deux cas", "PATCH : ne modifie que les champs fournis", "DELETE puis un nouveau POST", "GET avec un body de données"],
         correct: 1,
         explain: "Par convention REST, PUT attend la ressource COMPLÈTE (les champs omis sont souvent considérés supprimés/réinitialisés), tandis que PATCH est conçu pour une modification partielle — ne toucher qu'aux champs explicitement fournis dans la requête."
       },
@@ -2824,12 +2824,12 @@ const MODULES = [
         concept: "rest",
         prompt: "Pourquoi dit-on qu'une requête DELETE (comme GET, PUT) doit être \"idempotente\" ?",
         options: [
-          "Idempotente signifie qu'elle ne peut être appelée qu'une seule fois, sinon erreur obligatoire",
-          "Appeler la même requête DELETE plusieurs fois de suite doit produire le MÊME ÉTAT FINAL que l'appeler une seule fois — la deuxième suppression peut renvoyer 404 mais ne doit pas avoir d'effet destructeur supplémentaire",
-          "Ça n'a aucun rapport avec REST",
-          "Seul POST est idempotent en REST"
+          "Rappeler la requête donne le même état final qu'un seul appel",
+          "Idempotente = appelable une seule fois, sinon erreur",
+          "Ça n'a aucun rapport avec le style REST",
+          "Seul POST est réellement idempotent en REST"
         ],
-        correct: 1,
+        correct: 0,
         explain: "L'idempotence garantit qu'un client peut réessayer une requête (après un timeout réseau incertain) sans risque d'effet de bord multiplié. GET, PUT, DELETE sont censés être idempotents ; POST (création) ne l'est typiquement pas (rappeler POST /produits crée un DEUXIÈME produit)."
       },
       {
@@ -2838,7 +2838,7 @@ const MODULES = [
         prompt: "Pourquoi paginer une réponse d'API REST plutôt que de renvoyer TOUS les résultats d'un coup ?",
         options: [
           "Ce n'est jamais nécessaire, autant tout renvoyer",
-          "Renvoyer des milliers d'enregistrements d'un coup consomme inutilement bande passante, mémoire et temps de réponse — la pagination limite chaque réponse à une taille gérable, avec des métadonnées pour naviguer le reste",
+          "Éviter d'envoyer des milliers d'enregistrements d'un coup",
           "La pagination est une exigence obligatoire de HTTP",
           "Ça n'affecte que l'affichage, jamais les performances"
         ],
@@ -2849,10 +2849,10 @@ const MODULES = [
         concept: "routes-express",
         prompt: "Quelle est la différence entre req.params, req.query et req.body ?",
         options: [
-          "Ils sont identiques",
-          "params = segments dynamiques de l'URL (/users/:id), query = paramètres après le ? (?tri=asc), body = données envoyées dans le corps de la requête",
-          "params sert uniquement pour le JSON",
-          "body est toujours vide en Express"
+          "Ils sont tous les trois identiques",
+          "params = URL (:id), query = après le ?, body = corps envoyé",
+          "params ne sert que pour le contenu JSON",
+          "body est toujours vide dans une app Express"
         ],
         correct: 1,
         explain: "Pour une route GET /users/:id?tri=asc avec un corps JSON : req.params.id vient de l'URL elle-même, req.query.tri vient de la chaîne après le ?, et req.body contient les données envoyées (souvent en POST/PUT)."
@@ -2905,9 +2905,9 @@ const MODULES = [
         concept: "build",
         prompt: "Quel est le rôle principal d'un outil comme Vite ?",
         options: [
-          "Gérer une base de données",
-          "Servir de serveur de développement ultra-rapide et bundler le code pour la production",
-          "Remplacer entièrement React",
+          "Gérer la base de données de l'application",
+          "Serveur de dev ultra-rapide + bundler pour la production",
+          "Remplacer entièrement la bibliothèque React",
           "Héberger le site directement en production"
         ],
         correct: 1,
@@ -2918,11 +2918,11 @@ const MODULES = [
         prompt: "Pourquoi Vite est-il si rapide en développement, comparé à des bundlers plus anciens en mode dev classique ?",
         options: [
           "Il compile l'intégralité du projet avant de le servir",
-          "Il s'appuie sur les modules ES natifs du navigateur et ne transforme à la volée que les fichiers réellement demandés",
-          "Il n'utilise aucun serveur",
-          "Il met uniquement en cache les images"
+          "Il n'utilise aucun serveur de développement du tout",
+          "Il s'appuie sur les modules ES natifs, transforme à la demande",
+          "Il met uniquement les images en cache mémoire"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Plutôt que de tout bundler avant de démarrer, Vite sert les fichiers via les imports ES natifs du navigateur et ne transforme que ce qui est effectivement demandé, page par page — d'où un démarrage quasi instantané."
       },
       {
@@ -2936,10 +2936,10 @@ const MODULES = [
         concept: "build",
         prompt: "Qu'est-ce que le \"tree-shaking\" effectué par les bundlers ?",
         options: [
-          "Une animation visuelle",
-          "L'élimination du code mort ou non utilisé du bundle final, pour réduire sa taille",
+          "Une animation visuelle dans l'éditeur",
+          "L'élimination du code mort du bundle final",
           "Le tri alphabétique des fichiers du projet",
-          "Une technique de mise en cache uniquement"
+          "Une simple technique de mise en cache"
         ],
         correct: 1,
         explain: "Le tree-shaking analyse les imports/exports réellement utilisés et retire du bundle final tout le code qui n'est jamais importé, réduisant ainsi le poids final envoyé au navigateur."
@@ -2956,20 +2956,20 @@ const MODULES = [
         code: `const module = await import('./GrosComposant.js');`,
         prompt: "Que fait cet import() dynamique (avec parenthèses, dans le code) ?",
         options: [
-          "C'est identique à un import classique",
-          "Il charge le module de façon ASYNCHRONE, à la demande (lazy loading) — Vite en profite pour créer un fichier séparé (code-splitting), chargé uniquement quand ce code s'exécute réellement",
-          "Il importe uniquement les types TypeScript",
-          "Il empêche le module d'être mis en cache"
+          "C'est identique à un import classique statique",
+          "Il importe uniquement les types TypeScript du module",
+          "Il empêche le module d'être mis en cache navigateur",
+          "Charge le module à la demande (lazy) : Vite code-splitte"
         ],
-        correct: 1,
+        correct: 3,
         explain: "Contrairement à un import statique (résolu au build, inclus dans le bundle principal), import() dynamique est évalué à l'exécution et renvoie une Promise. Vite en profite pour découper ce module dans un fichier séparé, chargé seulement si/quand ce chemin de code est réellement atteint."
       },
       {
         concept: "build",
         prompt: "Que signifie le HMR (Hot Module Replacement) que propose le serveur de développement Vite ?",
         options: [
-          "Il redémarre entièrement l'application à chaque modification de fichier",
-          "Il remplace UNIQUEMENT le module modifié dans le navigateur, sans recharger toute la page — préservant l'état de l'application (state React, contenu d'un formulaire) pendant qu'on développe",
+          "Il redémarre toute l'application à chaque modification",
+          "Il remplace le seul module modifié, sans recharger la page",
           "C'est une fonctionnalité réservée à la production",
           "HMR ne fonctionne qu'avec des fichiers CSS"
         ],
@@ -2980,22 +2980,22 @@ const MODULES = [
         concept: "env-vite",
         prompt: "Pourquoi utilise-t-on des variables d'environnement (fichier .env) dans un projet Vite ?",
         options: [
-          "Pour stocker du code JavaScript exécutable",
-          "Pour séparer la configuration sensible ou spécifique à l'environnement (clés d'API, URLs) du code source",
-          "Elles sont automatiquement chiffrées et totalement invisibles côté client",
-          "Elles remplacent npm"
+          "Séparer la config sensible/par environnement du code source",
+          "Pour y stocker du code JavaScript exécutable",
+          "Elles sont chiffrées et invisibles côté client",
+          "Elles remplacent le gestionnaire de paquets npm"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Le fichier .env permet d'adapter la config selon l'environnement (dev/prod) sans toucher au code. Attention cependant : seules les variables préfixées VITE_ sont exposées au code client, et elles ne sont jamais vraiment \"secrètes\" une fois dans le bundle navigateur."
       },
       {
         concept: "env-vite",
         prompt: "Pourquoi Vite exige-t-il le préfixe VITE_ sur les variables exposées au code CLIENT, plutôt que de toutes les exposer automatiquement ?",
         options: [
-          "C'est purement esthétique",
-          "Sécurité : sans ce filtre explicite, une variable sensible du fichier .env (clé secrète, mot de passe de base de données) pourrait finir accidentellement dans le bundle JavaScript envoyé au navigateur, visible par n'importe qui",
-          "VITE_ accélère le build",
-          "C'est une contrainte imposée par React, pas par Vite"
+          "C'est purement esthétique et conventionnel",
+          "Sécurité : éviter qu'un secret du .env parte dans le bundle client",
+          "Le préfixe VITE_ accélère le build de production",
+          "Une contrainte imposée par React, pas par Vite"
         ],
         correct: 1,
         explain: "Tout ce qui finit dans le bundle client est visible par n'importe quel visiteur (via les outils de développement du navigateur). Exiger un préfixe explicite (VITE_) est un garde-fou : seules les variables volontairement marquées comme publiques traversent la frontière serveur→client."
@@ -3005,22 +3005,22 @@ const MODULES = [
         code: `console.log(import.meta.env.MODE);\nconsole.log(import.meta.env.DEV);`,
         prompt: "Que fournissent import.meta.env.MODE et .DEV, sans rien configurer dans un fichier .env ?",
         options: [
-          "Rien, ce sont des erreurs",
-          "Vite les injecte automatiquement : MODE vaut \"development\" ou \"production\" selon le contexte, DEV est un booléen équivalent (true en dev) — pratique pour adapter un comportement sans variable custom",
+          "Rien : ce sont des erreurs à l'exécution",
           "Il faut obligatoirement les définir soi-même dans .env",
-          "Ils ne fonctionnent qu'en production"
+          "Vite les injecte : MODE (dev/prod) et DEV (booléen)",
+          "Ils ne fonctionnent qu'en mode production"
         ],
-        correct: 1,
+        correct: 2,
         explain: "Vite expose plusieurs variables intégrées sans configuration : MODE, DEV, PROD, SSR... reflétant le contexte d'exécution courant. Utile par exemple pour désactiver des logs de debug uniquement en développement."
       },
       {
         concept: "env-vite",
         prompt: "Un fichier .env.production (par opposition à .env) est chargé dans quel cas par Vite ?",
         options: [
-          "Toujours, quel que soit le mode",
-          "Uniquement quand Vite tourne en mode production (typiquement lors de vite build) — Vite charge automatiquement le fichier .env.[mode] correspondant, en plus du .env de base",
-          "Jamais automatiquement, il faut l'importer manuellement",
-          "Seulement si le fichier .env est absent"
+          "Toujours chargé, quel que soit le mode",
+          "En mode production (vite build) : Vite charge .env.[mode]",
+          "Jamais automatiquement : il faut l'importer à la main",
+          "Seulement si le fichier .env de base est absent"
         ],
         correct: 1,
         explain: "Vite charge en cascade : .env (toujours), puis .env.[mode] (.env.development ou .env.production selon la commande lancée), les variables du fichier spécifique au mode ayant priorité sur celles du .env générique."
@@ -3030,10 +3030,10 @@ const MODULES = [
         code: `// .env\nDATABASE_URL=postgres://...\nVITE_API_URL=https://api.exemple.com`,
         prompt: "Laquelle de ces deux variables se retrouve dans le bundle JavaScript envoyé au navigateur ?",
         options: [
-          "Les deux",
-          "Seulement VITE_API_URL — DATABASE_URL, sans le préfixe VITE_, reste invisible au code client",
-          "Aucune des deux",
-          "Seulement DATABASE_URL"
+          "Les deux variables se retrouvent dans le bundle",
+          "Seulement VITE_API_URL ; DATABASE_URL reste invisible",
+          "Aucune des deux n'atteint le bundle client",
+          "Seulement DATABASE_URL, l'autre reste privée"
         ],
         correct: 1,
         explain: "Seules les variables préfixées VITE_ sont injectées dans import.meta.env côté client. DATABASE_URL reste un secret côté build/serveur, jamais accessible au JavaScript exécuté dans le navigateur."
@@ -3042,12 +3042,12 @@ const MODULES = [
         concept: "env-vite",
         prompt: "Pourquoi un fichier .env.local est-il généralement ajouté au .gitignore, contrairement à .env.example ?",
         options: [
-          "Ils devraient tous les deux être commités",
-          ".env.local contient typiquement de vraies valeurs (clés d'API, secrets locaux) propres à la machine du développeur — le commiter risquerait de divulguer des identifiants réels dans l'historique Git ; .env.example ne contient que des noms de variables sans valeurs sensibles",
-          ".env.local est généré automatiquement et ne doit jamais être modifié",
+          "Ils devraient en réalité tous les deux être commités",
+          ".env.local est généré auto et ne doit jamais changer",
+          ".env.local contient de vrais secrets, à ne pas commiter",
           "Vite refuse de fonctionner si .env.local est commité"
         ],
-        correct: 1,
+        correct: 2,
         explain: "La convention .env.example (commité, sans valeurs réelles) + .env.local (ignoré par git, avec les vraies valeurs) permet de documenter les variables nécessaires sans jamais exposer de secret dans l'historique du dépôt partagé."
       },
       {
@@ -3099,9 +3099,9 @@ const MODULES = [
         concept: "middlewares",
         prompt: "Ton frontend Next.js (localhost:3000) appelle une API Express séparée (localhost:3001) en local. Le navigateur bloque la requête. Quel est le problème et comment le résoudre côté serveur ?",
         options: [
-          "Aucun problème, ça fonctionne nativement",
-          "C'est une erreur CORS : il faut configurer le middleware cors sur le serveur Express pour autoriser l'origine du frontend",
-          "C'est un problème de base de données",
+          "Aucun problème : ce type d'appel fonctionne nativement",
+          "Erreur CORS : configurer le middleware cors sur Express",
+          "Un problème de base de données côté serveur",
           "Il faut désactiver JavaScript dans le navigateur"
         ],
         correct: 1,
@@ -3112,11 +3112,11 @@ const MODULES = [
         prompt: "Tu veux protéger une route Express pour qu'elle ne soit accessible qu'aux utilisateurs authentifiés. Quelle approche est appropriée ?",
         options: [
           "Vérifier un mot de passe en clair directement dans l'URL",
-          "Utiliser un middleware qui vérifie un token (ex : JWT) dans les en-têtes de la requête avant d'appeler next()",
           "Faire confiance au frontend pour cacher le bouton correspondant",
-          "Désactiver totalement la route"
+          "Un middleware qui valide un token (ex : JWT) avant d'appeler next()",
+          "Désactiver totalement la route concernée"
         ],
-        correct: 1,
+        correct: 2,
         explain: "La sécurité doit toujours être vérifiée côté serveur : un middleware d'authentification lit le token envoyé (souvent dans l'en-tête Authorization), le valide, et bloque la requête (ou appelle next()) selon le résultat. Cacher un bouton côté frontend n'empêche jamais un appel direct à l'API."
       },
       {
@@ -3124,8 +3124,8 @@ const MODULES = [
         prompt: "Dans une app Next.js qui affiche le profil privé d'un utilisateur, où vaut-il mieux récupérer ces données sensibles ?",
         options: [
           "Toujours côté client avec useEffect, quel que soit le contexte",
-          "Dans un Server Component qui vérifie la session côté serveur avant de renvoyer les données",
-          "Dans le fichier next.config.js",
+          "Dans un Server Component qui vérifie la session côté serveur",
+          "Dans le fichier de configuration next.config.js",
           "Directement dans une feuille de style CSS"
         ],
         correct: 1,
@@ -3135,12 +3135,12 @@ const MODULES = [
         concept: "types-ts",
         prompt: "Tu utilises TypeScript à la fois sur ton frontend React et ton backend Express. Quel est l'avantage de partager les types (ex : l'interface User) entre les deux ?",
         options: [
-          "Cela ralentit volontairement le projet",
-          "Cela garantit la cohérence des données échangées entre frontend et backend, et évite les erreurs de désynchronisation des structures",
-          "Cela n'a aucun intérêt pratique",
-          "Cela remplace complètement les tests automatisés"
+          "Cela ralentit volontairement le projet entier",
+          "Cela n'a en réalité aucun intérêt pratique",
+          "Cela remplace complètement les tests automatisés",
+          "Cohérence des données front/back, moins de désynchronisation"
         ],
-        correct: 1,
+        correct: 3,
         explain: "Quand le frontend et le backend partagent les mêmes définitions de types (souvent via un package ou dossier commun), une modification de structure côté backend est immédiatement signalée comme erreur de type côté frontend si celui-ci n'est pas mis à jour."
       },
       {
@@ -3148,7 +3148,7 @@ const MODULES = [
         prompt: "Ton build Vite est lent à charger en production et le bundle final est trop lourd. Quelle action est la plus pertinente ?",
         options: [
           "Ajouter encore plus de dépendances au projet",
-          "Analyser le contenu du bundle, activer le code-splitting / lazy loading, et vérifier que les dépendances inutilisées sont bien éliminées (tree-shaking)",
+          "Analyser le bundle, activer le code-splitting et le tree-shaking",
           "Supprimer Vite et tout réécrire en HTML pur",
           "Ignorer le problème, ça n'affecte pas les utilisateurs"
         ],
@@ -3159,12 +3159,12 @@ const MODULES = [
         concept: "api-routes",
         prompt: "Pour une nouvelle application, comment choisir entre \"monolithe Next.js avec API routes intégrées\" et \"Next.js frontend + Express backend séparé\" ?",
         options: [
-          "Selon la couleur du thème choisi",
-          "Selon le besoin (ou non) d'un backend réutilisable par plusieurs clients (mobile, autres services) : si oui, séparer simplifie souvent l'architecture ; sinon, le monolithe Next.js réduit la complexité",
-          "Selon le nombre de fichiers CSS du projet",
-          "Selon la version de Node installée sur la machine du développeur"
+          "Selon le besoin (ou non) d'un backend réutilisable par plusieurs clients",
+          "Selon la couleur du thème choisi pour l'application",
+          "Selon le nombre de fichiers CSS présents dans le projet",
+          "Selon la version de Node installée sur la machine"
         ],
-        correct: 1,
+        correct: 0,
         explain: "Si une seule application web consomme l'API, le monolithe Next.js (API routes intégrées) limite la complexité opérationnelle (un seul déploiement). Si plusieurs clients (app mobile, autres services) doivent consommer la même API, un backend Express séparé devient souvent plus pertinent."
       },
       {
@@ -4314,6 +4314,11 @@ function QualificationView({ ctx }) {
         <Frame accent={AMBER} className="p-4">
           <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
             <h4 className="font-mono font-bold mb-4">{q.prompt}</h4>
+            {q.code && (
+              <pre className="font-mono text-xs sm:text-sm p-3 rounded-md mb-4 overflow-x-auto whitespace-pre" style={{ backgroundColor: "#081B33", borderLeft: `3px solid ${AMBER}`, color: "#C9E2F5" }}>
+                {q.code}
+              </pre>
+            )}
             <div className="space-y-2">
               {q.options?.map((opt, idx) => (
                 <button
@@ -4639,6 +4644,11 @@ function DailyView({ ctx }) {
                 <p className="font-mono text-[10px] tracking-widest mb-2" style={{ color: SUCCESS }}>★ BONUS — secteur avancé, hors classement</p>
               )}
               <h4 className="font-mono font-bold mb-4">{q.prompt}</h4>
+              {q.code && (
+                <pre className="font-mono text-xs sm:text-sm p-3 rounded-md mb-4 overflow-x-auto whitespace-pre" style={{ backgroundColor: "#081B33", borderLeft: `3px solid ${AMBER}`, color: "#C9E2F5" }}>
+                  {q.code}
+                </pre>
+              )}
               <div className="space-y-2">
                 {q.options?.map((opt, idx) => (
                   <button
@@ -4701,7 +4711,8 @@ function DailyView({ ctx }) {
 function SrsView({ ctx }) {
   const { srsSessionItems, srsSessionIdx, setSrsSessionIdx, setView, profile, persist } = ctx;
   const [rating, setRating] = useState(null);
-  const [showRating, setShowRating] = useState(false);
+  const [selected, setSelected] = useState(null); // réponse choisie (QCM)
+  const [revealed, setRevealed] = useState(false); // question sans options : révèle la notation
 
   if (!srsSessionItems || srsSessionIdx >= srsSessionItems.length) {
     return (
@@ -4730,8 +4741,15 @@ function SrsView({ ctx }) {
     persist({ ...profile, srsState: newSrsState });
     setSrsSessionIdx(i => i + 1);
     setRating(null);
-    setShowRating(false);
+    setSelected(null);
+    setRevealed(false);
   }
+
+  const hasOptions = Array.isArray(q.options) && q.options.length > 0;
+  const hasCorrect = typeof q.correct === "number";
+  // Une question à choix est « traitée » dès qu'on a cliqué une réponse ; une
+  // question sans choix (auto-évaluation pure) l'est quand on révèle la note.
+  const answered = hasOptions ? selected !== null : revealed;
 
   return (
     <div className="min-h-screen p-4" style={{ backgroundColor: BG, color: TEXT }}>
@@ -4749,17 +4767,53 @@ function SrsView({ ctx }) {
           <div style={{ backgroundColor: PANEL }} className="p-4 -m-4 rounded-sm">
             <p className="text-xs font-mono mb-2" style={{ color: mod.accent }}>{mod.title}</p>
             <h4 className="font-mono font-bold mb-4">{q.prompt}</h4>
-            <div className="space-y-2 mb-4">
-              {q.options?.map((opt, idx) => (
-                <div key={idx} className="p-3 rounded-lg" style={{ backgroundColor: PANEL_SOFT, border: `1px solid ${LINE}`, color: TEXT }}>
-                  {opt}
-                </div>
-              ))}
-            </div>
-            {!showRating ? (
-              <button onClick={() => setShowRating(true)} className="w-full py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: SUCCESS, color: BG }}>
-                J'ai terminé → Noter ma réponse
-              </button>
+            {q.code && (
+              <pre className="font-mono text-xs sm:text-sm p-3 rounded-md mb-4 overflow-x-auto whitespace-pre" style={{ backgroundColor: "#081B33", borderLeft: `3px solid ${mod.accent}`, color: "#C9E2F5" }}>
+                {q.code}
+              </pre>
+            )}
+            {hasOptions && (
+              <div className="space-y-2 mb-4">
+                {q.options.map((opt, idx) => {
+                  let bg = PANEL_SOFT, border = LINE, textColor = TEXT;
+                  if (answered && hasCorrect) {
+                    if (idx === q.correct) { bg = `${SUCCESS}22`; border = SUCCESS; textColor = SUCCESS; }
+                    else if (idx === selected) { bg = `${DANGER}22`; border = DANGER; textColor = DANGER; }
+                  } else if (selected === idx) {
+                    border = SUCCESS;
+                  }
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => !answered && setSelected(idx)}
+                      disabled={answered}
+                      className="w-full text-left p-3 rounded-lg transition-colors flex items-start gap-2 disabled:cursor-default"
+                      style={{ backgroundColor: bg, border: `1px solid ${border}`, color: textColor }}
+                    >
+                      <span className="font-bold shrink-0">{String.fromCharCode(65 + idx)}.</span>
+                      <span>{opt}</span>
+                      {answered && hasCorrect && idx === q.correct && <Check size={14} className="ml-auto shrink-0 mt-0.5" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {answered && hasCorrect && hasOptions && (
+              <p className="text-sm mb-3 font-mono" style={{ color: selected === q.correct ? SUCCESS : DANGER }}>
+                {selected === q.correct ? "✓ Correct !" : `✗ La bonne réponse : ${String.fromCharCode(65 + q.correct)}`}
+              </p>
+            )}
+            {answered && q.explain && (
+              <p className="text-xs mb-4 leading-relaxed" style={{ color: TEXT_MUTED }}>{q.explain}</p>
+            )}
+            {!answered ? (
+              hasOptions ? (
+                <p className="text-xs text-center font-mono" style={{ color: TEXT_MUTED }}>Choisis ta réponse pour te noter</p>
+              ) : (
+                <button onClick={() => setRevealed(true)} className="w-full py-2 rounded-lg font-mono text-sm" style={{ backgroundColor: SUCCESS, color: BG }}>
+                  J'ai terminé → Noter ma réponse
+                </button>
+              )
             ) : (
               <>
                 <p className="text-xs mb-3 text-center" style={{ color: TEXT_MUTED }}>Comment as-tu trouvé cette question?</p>
@@ -8137,10 +8191,25 @@ function ResultView({ ctx }) {
 // Exports nommés pour les tests (le harness n'importe que le défaut).
 export { MODULES, applyRemoteBank, isUsableRemote, STATIC_BATTLE_QIDS, collectAllQuestions, getBattleQuestions, staticQuestionToBankPayload, ADVANCED_TIER };
 
+// Vues « stables » : elles se re-dérivent entièrement du profil persisté, donc
+// on peut y revenir tel quel après un refresh. Les vues transitoires (battle,
+// daily, srs, qualification, technical, intro, result) dépendent d'un état en
+// mémoire (run en cours, index de question, HP…) et ne sont pas restaurées.
+const STABLE_VIEWS = new Set(["map", "codex", "chantier", "skills", "parcours", "leaderboard"]);
+
 export default function FullstackQuest() {
   const [profile, setProfile] = useState(null);
   const [soundOn, setSoundOn] = useState(true);
-  const [view, setView] = useState("map"); // map | intro | battle | result | codex
+  const [view, setView] = useState(() => {
+    // Restaure la dernière vue « stable » après un refresh (F5). On ne restaure
+    // que les vues qui se re-dérivent du profil : les vues transitoires (duel,
+    // examen, révision…) perdent leur état en mémoire et repartiraient vides.
+    try {
+      const v = sessionStorage.getItem("fsq-view");
+      if (v && STABLE_VIEWS.has(v)) return v;
+    } catch { /* ignore */ }
+    return "map";
+  }); // map | intro | battle | result | codex
   const [activeIdx, setActiveIdx] = useState(null);
   const [qIdx, setQIdx] = useState(0);
   const [selected, setSelected] = useState(null);
@@ -8375,6 +8444,16 @@ export default function FullstackQuest() {
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
   }, []);
+
+  // Mémorise la vue courante pour survivre à un refresh — uniquement les vues
+  // stables (cf. STABLE_VIEWS). En vue transitoire on ne touche pas au stockage,
+  // ce qui fait retomber le refresh sur la dernière vue stable connue.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (STABLE_VIEWS.has(view)) sessionStorage.setItem("fsq-view", view);
+    } catch { /* ignore */ }
+  }, [view]);
 
   function enterGame() {
     try { sessionStorage.setItem("fsq-entered", "1"); } catch { /* ignore */ }
